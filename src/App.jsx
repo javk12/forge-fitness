@@ -1,3 +1,4 @@
+// FORGE v2.1 — bracket fix applied. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -1335,6 +1336,8 @@ function Onboarding({ onDone }) {
                 </div>
               </Field>
             </div>
+          </div>
+        )}
 
         {currentKey === 'expEquip' && (
           <div>
