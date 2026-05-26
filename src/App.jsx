@@ -1008,6 +1008,8 @@ function Onboarding({ onDone }) {
     name: '', age: 18, sex: 'male',
     height: 175, weight: 75,
     type: null, goal: null,
+    targetWeight: null, timeline: null,
+    focusAreas: [], strengthGoals: [],
     experience: 'beginner', equipment: 'full_gym',
     activity: 'moderate', daysPerWeek: 4, sessionLength: 60,
     trainingDays: DEFAULT_TRAINING_DAYS[4],
@@ -1050,8 +1052,8 @@ function Onboarding({ onDone }) {
 
   // We'll handle ordering with a mapping function based on isTeenAge
   const stepKeys = isTeenAge
-    ? ['welcome','basics','teenSafety','body','type','goal','expEquip','schedule','diet','health','motivation']
-    : ['welcome','basics','body','type','goal','expEquip','schedule','diet','health','motivation'];
+    ? ['welcome','basics','teenSafety','body','type','goal','goalDetails','expEquip','schedule','diet','health','motivation']
+    : ['welcome','basics','body','type','goal','goalDetails','expEquip','schedule','diet','health','motivation'];
 
   const currentKey = stepKeys[step];
 
@@ -1063,6 +1065,7 @@ function Onboarding({ onDone }) {
       case 'body': return data.height > 100 && data.height < 250 && data.weight > 25 && data.weight < 300;
       case 'type': return !!data.type;
       case 'goal': return !!data.goal;
+      case 'goalDetails': return !!data.timeline;
       case 'expEquip': return !!data.experience && !!data.equipment;
       case 'schedule': return !!data.activity && !!data.daysPerWeek && !!data.sessionLength && data.trainingDays.length === data.daysPerWeek;
       case 'diet': return !!data.diet;
@@ -1135,20 +1138,13 @@ function Onboarding({ onDone }) {
                   { id: 'male', label: 'MALE' }, { id: 'female', label: 'FEMALE' },
                 ]}/>
               </Field>
-              <Field label="Age">
-                <input type="number" min="13" max="100" value={data.age}
-                  onChange={e => set({ age: +e.target.value || 0 })} style={inputStyle} />
-                {data.age >= 13 && data.age < 18 && (
-                  <Note color={C.accent2} icon={<Shield size={12}/>}>
-                    Teen Mode will be enabled. We'll adjust nutrition and goals for safe, healthy development.
-                  </Note>
-                )}
-                {tooYoung && data.age > 0 && (
-                  <Note color={C.danger} icon={<AlertCircle size={12}/>}>
-                    FORGE requires you to be at least 13. If you're younger, please train with a coach or family member.
-                  </Note>
-                )}
-              </Field>
+              <NumberSlider label="Age (years)" value={data.age} onChange={v => set({ age: v })}
+                min={13} max={80} unit="" />
+              {data.age >= 13 && data.age < 18 && (
+                <Note color={C.accent2} icon={<Shield size={12}/>}>
+                  Teen Mode will be enabled. We'll adjust nutrition and goals for safe, healthy development.
+                </Note>
+              )}
             </div>
           </div>
         )}
@@ -1190,13 +1186,11 @@ function Onboarding({ onDone }) {
             <Crumb>02 · BODY</Crumb>
             <H1>YOUR FRAME.</H1>
             <Sub>Used to calculate calories. Estimate if you don't know exactly.</Sub>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginTop: 28 }}>
-              <Field label="Height (cm)">
-                <input type="number" value={data.height} onChange={e => set({ height: +e.target.value || 0 })} style={inputStyle} />
-              </Field>
-              <Field label="Weight (kg)">
-                <input type="number" value={data.weight} onChange={e => set({ weight: +e.target.value || 0 })} style={inputStyle} />
-              </Field>
+            <div style={{ display: 'grid', gap: 24, marginTop: 28 }}>
+              <NumberSlider label="Height" value={data.height} onChange={v => set({ height: v })}
+                min={120} max={220} unit=" cm" />
+              <NumberSlider label="Weight" value={data.weight} onChange={v => set({ weight: v })}
+                min={30} max={200} unit=" kg" />
             </div>
             <div style={{ marginTop: 16, padding: 14, border: `1px solid ${C.line}`, background: C.panel }}>
               <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 2 }}>/ PREVIEW</div>
@@ -1252,6 +1246,95 @@ function Onboarding({ onDone }) {
             )}
           </div>
         )}
+
+        {currentKey === 'goalDetails' && (
+          <div>
+            <Crumb>05 · GET SPECIFIC</Crumb>
+            <H1>GIVE US THE<br/>FULL PICTURE.</H1>
+            <Sub>The more we know, the sharper your plan and your coach can be.</Sub>
+
+            <div style={{ display: 'grid', gap: 28, marginTop: 28 }}>
+              {!isTeenAge && (
+                <div>
+                  <NumberSlider
+                    label="Dream weight"
+                    value={data.targetWeight ?? data.weight}
+                    onChange={v => set({ targetWeight: v })}
+                    min={30} max={200} unit=" kg" />
+                  <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2, marginTop: 6 }}>
+                    {(() => {
+                      const target = data.targetWeight ?? data.weight;
+                      const diff = +(target - data.weight).toFixed(1);
+                      if (Math.abs(diff) < 0.5) return '/ MAINTAINING CURRENT WEIGHT';
+                      if (diff < 0) return `/ LOSING ${Math.abs(diff)} KG`;
+                      return `/ GAINING ${diff} KG`;
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              <Field label="Timeline">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {[
+                    { id: '3mo',    label: '3 MONTHS' },
+                    { id: '6mo',    label: '6 MONTHS' },
+                    { id: '12mo',   label: '1 YEAR' },
+                    { id: 'norush', label: 'NO RUSH' },
+                  ].map(t => {
+                    const on = data.timeline === t.id;
+                    return (
+                      <button key={t.id} onClick={() => set({ timeline: t.id })} style={{
+                        padding: '10px 16px', cursor: 'pointer',
+                        background: on ? C.accent : 'transparent',
+                        border: `1px solid ${on ? C.accent : C.line}`,
+                        color: on ? '#000' : C.text,
+                        fontFamily: fontMono, fontSize: 13, letterSpacing: 1,
+                      }}>{t.label}</button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              <Field label="Focus areas — tap any (optional)">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {['Chest','Back','Shoulders','Arms','Legs','Glutes','Core'].map(a => {
+                    const on = data.focusAreas.includes(a);
+                    return (
+                      <button key={a} onClick={() => set({
+                        focusAreas: on ? data.focusAreas.filter(x => x !== a) : [...data.focusAreas, a]
+                      })} style={{
+                        padding: '6px 12px', cursor: 'pointer',
+                        background: on ? C.accent : 'transparent',
+                        border: `1px solid ${on ? C.accent : C.line}`,
+                        color: on ? '#000' : C.text, fontSize: 13, fontFamily: fontMono, letterSpacing: 1,
+                      }}>{a.toUpperCase()}</button>
+                    );
+                  })}
+                </div>
+              </Field>
+
+              <Field label="Specific milestones — tap any (optional)">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {[
+                    'First pull-up','10 pull-ups','Bench bodyweight','Squat 1.5x bw',
+                    'Deadlift 2x bw','Handstand 30s','Muscle-up','Run 5K','Run 10K',
+                    'Visible abs','Touch toes','Splits','Pistol squat',
+                  ].map(g => {
+                    const on = data.strengthGoals.includes(g);
+                    return (
+                      <button key={g} onClick={() => set({
+                        strengthGoals: on ? data.strengthGoals.filter(x => x !== g) : [...data.strengthGoals, g]
+                      })} style={{
+                        padding: '6px 12px', cursor: 'pointer',
+                        background: on ? C.accent : 'transparent',
+                        border: `1px solid ${on ? C.accent : C.line}`,
+                        color: on ? '#000' : C.text, fontSize: 13, fontFamily: fontMono, letterSpacing: 1,
+                      }}>{g.toUpperCase()}</button>
+                    );
+                  })}
+                </div>
+              </Field>
+            </div>
 
         {currentKey === 'expEquip' && (
           <div>
@@ -2840,6 +2923,10 @@ ATHLETE PROFILE:
 - Sex: ${profile.sex}, Height: ${profile.height}cm, Weight: ${profile.weight}kg
 - Discipline: ${wtype.sub} (${profile.type})
 - Goal: ${goal.name} (${goal.tag})
+${profile.targetWeight ? `- Target weight: ${profile.targetWeight}kg (${profile.targetWeight - profile.weight > 0 ? '+' : ''}${(profile.targetWeight - profile.weight).toFixed(1)}kg from current)` : ''}
+${profile.timeline ? `- Timeline: ${profile.timeline === '3mo' ? '3 months' : profile.timeline === '6mo' ? '6 months' : profile.timeline === '12mo' ? '1 year' : 'no rush'}` : ''}
+${profile.focusAreas && profile.focusAreas.length ? `- Focus areas: ${profile.focusAreas.join(', ')}` : ''}
+${profile.strengthGoals && profile.strengthGoals.length ? `- Specific milestones they want to hit: ${profile.strengthGoals.join(', ')}` : ''}
 - Experience: ${profile.experience}
 - Equipment: ${profile.equipment}
 - Schedule: ${profile.daysPerWeek}x/week, ${profile.sessionLength}min per session
@@ -2997,6 +3084,26 @@ const inputStyle = {
   width: '100%', background: C.bg, border: `1px solid ${C.line}`, color: C.text,
   padding: '12px 14px', fontSize: 14, fontFamily: fontBody, outline: 'none', borderRadius: 0,
 };
+
+function NumberSlider({ label, value, onChange, min, max, step = 1, unit = '', accent = C.accent }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+        {label && <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2 }}>{label.toUpperCase()}</div>}
+        <div style={{ fontFamily: fontDisplay, fontSize: 40, color: accent, letterSpacing: 0.5, lineHeight: 1 }}>
+          {value}<span style={{ fontSize: 16, color: C.dim, marginLeft: 4 }}>{unit.trim()}</span>
+        </div>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(+e.target.value)}
+        style={{ width: '100%', accentColor: accent, cursor: 'pointer' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: fontMono, fontSize: 9, color: C.dim, marginTop: 4 }}>
+        <span>{min}{unit}</span>
+        <span>{max}{unit}</span>
+      </div>
+    </div>
+  );
+}
 
 function Btn({ children, onClick, primary, disabled, style }) {
   return (
