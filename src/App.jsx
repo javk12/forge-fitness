@@ -1,4 +1,4 @@
-// FORGE v2.2 — smart body defaults. If you see this comment, this is the correct file.
+// FORGE v2.3 — PWA support added. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -958,7 +958,131 @@ export default function ForgeApp() {
       </main>
 
       <BottomNav tab={tab} setTab={setTab} />
+      <InstallPrompt />
     </div>
+  );
+}
+
+// ============================================================
+// PWA INSTALL PROMPT
+// ============================================================
+// Shows a banner offering to install FORGE as an app.
+// - Android/Chrome/Edge: triggers the native install prompt
+// - iOS Safari: shows instructions (no API available)
+// - Hides if already installed, or if user dismissed it
+function InstallPrompt() {
+  const [show, setShow] = useState(false);
+  const [deferred, setDeferred] = useState(null);
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  useEffect(() => {
+    // Already installed? → don't show
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true;
+    if (isStandalone) return;
+    // Already dismissed? → don't show again for 14 days
+    const dismissedAt = +(localStorage.getItem('forge2:installDismissedAt') || 0);
+    if (dismissedAt && Date.now() - dismissedAt < 14 * 24 * 3600 * 1000) return;
+
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+    const isAndroidChrome = /Android/.test(ua);
+
+    // iOS: no install API, so just show the prompt and let user open instructions
+    if (isIOS) {
+      setShow(true);
+      return;
+    }
+
+    // Android / Chrome / Edge: wait for the install prompt event
+    const onBefore = (e) => {
+      e.preventDefault();
+      setDeferred(e);
+      setShow(true);
+    };
+    window.addEventListener('beforeinstallprompt', onBefore);
+    return () => window.removeEventListener('beforeinstallprompt', onBefore);
+  }, []);
+
+  const dismiss = () => {
+    localStorage.setItem('forge2:installDismissedAt', String(Date.now()));
+    setShow(false);
+  };
+
+  const install = async () => {
+    if (deferred) {
+      deferred.prompt();
+      const { outcome } = await deferred.userChoice;
+      if (outcome === 'accepted') setShow(false);
+      else dismiss();
+      setDeferred(null);
+    } else {
+      // iOS path — show the instructional modal
+      setShowIOSGuide(true);
+    }
+  };
+
+  if (!show) return null;
+
+  return (
+    <>
+      <div style={{
+        position: 'fixed', bottom: 86, left: 16, right: 16, zIndex: 100,
+        maxWidth: 520, margin: '0 auto',
+        background: C.panel, border: `1px solid ${C.accent}`,
+        padding: '14px 16px',
+        display: 'flex', alignItems: 'center', gap: 12,
+        boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{
+          width: 40, height: 40, background: C.accent, color: '#000',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: fontDisplay, fontSize: 26, flexShrink: 0,
+        }}>F</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 2 }}>/ INSTALL APP</div>
+          <div style={{ fontFamily: fontDisplay, fontSize: 18, letterSpacing: 0.5, marginTop: 2 }}>
+            ADD FORGE TO HOME SCREEN
+          </div>
+        </div>
+        <button onClick={install} style={{
+          background: C.accent, color: '#000', border: 0, cursor: 'pointer',
+          padding: '10px 14px', fontFamily: fontMono, fontSize: 11, letterSpacing: 2, fontWeight: 700,
+          flexShrink: 0,
+        }}>INSTALL</button>
+        <button onClick={dismiss} aria-label="Dismiss" style={{
+          background: 'transparent', color: C.dim, border: 0, cursor: 'pointer',
+          fontSize: 20, padding: '4px 8px', flexShrink: 0,
+        }}>×</button>
+      </div>
+
+      {showIOSGuide && (
+        <div onClick={() => setShowIOSGuide(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 200,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background: C.bg, border: `1px solid ${C.accent}`, padding: 24, maxWidth: 420,
+          }}>
+            <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 2, marginBottom: 8 }}>/ INSTALL FORGE ON iOS</div>
+            <div style={{ fontFamily: fontDisplay, fontSize: 26, letterSpacing: 0.5, marginBottom: 18, lineHeight: 1 }}>3 STEPS.</div>
+            <ol style={{ paddingLeft: 20, lineHeight: 1.6, fontSize: 14 }}>
+              <li>Tap the <strong>Share</strong> button at the bottom of Safari (a square with an arrow pointing up).</li>
+              <li>Scroll down and tap <strong>"Add to Home Screen"</strong>.</li>
+              <li>Tap <strong>"Add"</strong> in the top-right corner.</li>
+            </ol>
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 18, letterSpacing: 1 }}>
+              ↳ Must be in Safari. Won't work in Chrome on iOS.
+            </div>
+            <button onClick={() => { setShowIOSGuide(false); dismiss(); }} style={{
+              marginTop: 20, background: C.accent, color: '#000', border: 0, cursor: 'pointer',
+              padding: '12px 18px', fontFamily: fontMono, fontSize: 11, letterSpacing: 2, fontWeight: 700, width: '100%',
+            }}>GOT IT</button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
