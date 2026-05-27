@@ -1,4 +1,4 @@
-// FORGE v2.1 — bracket fix applied. If you see this comment, this is the correct file.
+// FORGE v2.2 — smart body defaults. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -29,21 +29,54 @@ const WORKOUT_TYPES = [
 ];
 
 const GOALS_ADULT = [
-  { id: 'muscle',    name: 'Build Muscle',   tag: 'HYPERTROPHY', surplus:  300, proteinPerKg: 2.0 },
-  { id: 'fat_loss',  name: 'Lose Fat',       tag: 'CUTTING',     surplus: -500, proteinPerKg: 2.2 },
-  { id: 'strength',  name: 'Get Stronger',   tag: 'POWER',       surplus:  150, proteinPerKg: 2.0 },
-  { id: 'endurance', name: 'Build Endurance',tag: 'CONDITIONING',surplus:    0, proteinPerKg: 1.6 },
-  { id: 'recomp',    name: 'Body Recomp',    tag: 'LEAN GAINS',  surplus:  -50, proteinPerKg: 2.2 },
-  { id: 'general',   name: 'Stay Healthy',   tag: 'WELLNESS',    surplus:    0, proteinPerKg: 1.4 },
+  { id: 'muscle',     name: 'Build Muscle',         tag: 'HYPERTROPHY',   surplus:  300, proteinPerKg: 2.0 },
+  { id: 'fat_loss',   name: 'Lose Fat',             tag: 'CUTTING',       surplus: -500, proteinPerKg: 2.2 },
+  { id: 'strength',   name: 'Get Stronger',         tag: 'POWER',         surplus:  150, proteinPerKg: 2.0 },
+  { id: 'endurance',  name: 'Build Endurance',      tag: 'CONDITIONING',  surplus:    0, proteinPerKg: 1.6 },
+  { id: 'recomp',     name: 'Body Recomp',          tag: 'LEAN GAINS',    surplus:  -50, proteinPerKg: 2.2 },
+  { id: 'general',    name: 'Stay Healthy',         tag: 'WELLNESS',      surplus:    0, proteinPerKg: 1.4 },
+  { id: 'mass',       name: 'Mass / Bulk',          tag: 'SIZE',          surplus:  500, proteinPerKg: 1.8 },
+  { id: 'athletic',   name: 'Athletic Performance', tag: 'SPORTS',        surplus:  100, proteinPerKg: 1.8 },
+  { id: 'functional', name: 'Functional Strength',  tag: 'REAL WORLD',    surplus:  100, proteinPerKg: 1.8 },
+  { id: 'mobility',   name: 'Mobility & Flex',      tag: 'SUPPLENESS',    surplus:    0, proteinPerKg: 1.4 },
 ];
 
 const GOALS_TEEN = [
-  { id: 'muscle',    name: 'Build Strength & Size', tag: 'GROWTH',       surplus:  400, proteinPerKg: 1.8 },
-  { id: 'strength',  name: 'Get Stronger',          tag: 'STRENGTH',     surplus:  200, proteinPerKg: 1.8 },
-  { id: 'recomp',    name: 'Lean Up (Mild)',        tag: 'RECOMP',       surplus: -150, proteinPerKg: 1.8 },
-  { id: 'endurance', name: 'Build Endurance',       tag: 'CONDITIONING', surplus:    0, proteinPerKg: 1.4 },
-  { id: 'general',   name: 'Healthy & Athletic',    tag: 'WELLNESS',     surplus:    0, proteinPerKg: 1.4 },
+  { id: 'muscle',     name: 'Build Strength & Size', tag: 'GROWTH',       surplus:  400, proteinPerKg: 1.8 },
+  { id: 'strength',   name: 'Get Stronger',          tag: 'STRENGTH',     surplus:  200, proteinPerKg: 1.8 },
+  { id: 'recomp',     name: 'Lean Up (Mild)',        tag: 'RECOMP',       surplus: -150, proteinPerKg: 1.8 },
+  { id: 'endurance',  name: 'Build Endurance',       tag: 'CONDITIONING', surplus:    0, proteinPerKg: 1.4 },
+  { id: 'general',    name: 'Healthy & Athletic',    tag: 'WELLNESS',     surplus:    0, proteinPerKg: 1.4 },
+  { id: 'athletic',   name: 'Sports Performance',    tag: 'ATHLETIC',     surplus:  200, proteinPerKg: 1.6 },
+  { id: 'functional', name: 'Functional Strength',   tag: 'REAL WORLD',   surplus:  200, proteinPerKg: 1.6 },
+  { id: 'mobility',   name: 'Mobility & Flex',       tag: 'SUPPLENESS',   surplus:  100, proteinPerKg: 1.4 },
 ];
+
+// Population averages — used as smart starting defaults on the body step
+function avgBody(age, sex) {
+  const a = Math.max(13, Math.min(80, +age || 18));
+  if (sex === 'female') {
+    if (a <= 13) return { height: 157, weight: 48 };
+    if (a <= 14) return { height: 159, weight: 52 };
+    if (a <= 15) return { height: 161, weight: 55 };
+    if (a <= 16) return { height: 162, weight: 57 };
+    if (a <= 17) return { height: 163, weight: 58 };
+    if (a <= 30) return { height: 163, weight: 65 };
+    if (a <= 45) return { height: 163, weight: 70 };
+    if (a <= 60) return { height: 162, weight: 72 };
+    return { height: 161, weight: 70 };
+  }
+  // male / other
+  if (a <= 13) return { height: 157, weight: 50 };
+  if (a <= 14) return { height: 164, weight: 55 };
+  if (a <= 15) return { height: 169, weight: 61 };
+  if (a <= 16) return { height: 173, weight: 66 };
+  if (a <= 17) return { height: 175, weight: 70 };
+  if (a <= 30) return { height: 178, weight: 78 };
+  if (a <= 45) return { height: 178, weight: 84 };
+  if (a <= 60) return { height: 177, weight: 86 };
+  return { height: 175, weight: 80 };
+}
 
 const ACTIVITY_LEVELS = [
   { id: 'sedentary', name: 'Sedentary', mult: 1.2,   desc: 'School/desk, little movement' },
@@ -100,12 +133,16 @@ const ALLERGENS = ['Dairy', 'Gluten', 'Nuts', 'Eggs', 'Shellfish', 'Soy'];
 const COMMON_INJURIES = ['Lower back', 'Knees', 'Shoulders', 'Elbows', 'Wrists', 'Hips', 'Neck'];
 
 const GOAL_SCHEMES = {
-  muscle:    { sets: 4, reps: '8–12',  rest: 90,  tempo: 'Controlled' },
-  strength:  { sets: 5, reps: '3–5',   rest: 180, tempo: 'Explosive' },
-  fat_loss:  { sets: 3, reps: '12–15', rest: 45,  tempo: 'Steady' },
-  endurance: { sets: 3, reps: '15–20', rest: 30,  tempo: 'Continuous' },
-  recomp:    { sets: 4, reps: '8–12',  rest: 75,  tempo: 'Controlled' },
-  general:   { sets: 3, reps: '10–12', rest: 60,  tempo: 'Controlled' },
+  muscle:     { sets: 4, reps: '8–12',  rest: 90,  tempo: 'Controlled' },
+  strength:   { sets: 5, reps: '3–5',   rest: 180, tempo: 'Explosive' },
+  fat_loss:   { sets: 3, reps: '12–15', rest: 45,  tempo: 'Steady' },
+  endurance:  { sets: 3, reps: '15–20', rest: 30,  tempo: 'Continuous' },
+  recomp:     { sets: 4, reps: '8–12',  rest: 75,  tempo: 'Controlled' },
+  general:    { sets: 3, reps: '10–12', rest: 60,  tempo: 'Controlled' },
+  mass:       { sets: 5, reps: '6–10',  rest: 120, tempo: 'Controlled' },
+  athletic:   { sets: 4, reps: '5–8',   rest: 90,  tempo: 'Explosive' },
+  functional: { sets: 3, reps: '8–12',  rest: 60,  tempo: 'Controlled' },
+  mobility:   { sets: 3, reps: '12–15', rest: 30,  tempo: 'Slow + full ROM' },
 };
 
 const WORKOUT_PLANS = {
@@ -834,6 +871,10 @@ export default function ForgeApp() {
         if (!p.trainingDays) {
           p.trainingDays = DEFAULT_TRAINING_DAYS[p.daysPerWeek] || DEFAULT_TRAINING_DAYS[4];
         }
+        // Migration: older profiles have `goal` (single) but not `goals` (array)
+        if (!p.goals || p.goals.length === 0) {
+          p.goals = p.goal ? [p.goal] : [];
+        }
         setProfile(p);
       }
       if (f && f.date === todayStr()) setFoodLog(f);
@@ -1008,7 +1049,7 @@ function Onboarding({ onDone }) {
   const [data, setData] = useState({
     name: '', age: 18, sex: 'male',
     height: 175, weight: 75,
-    type: null, goal: null,
+    type: null, goal: null, goals: [],
     targetWeight: null, timeline: null,
     focusAreas: [], strengthGoals: [],
     experience: 'beginner', equipment: 'full_gym',
@@ -1020,6 +1061,7 @@ function Onboarding({ onDone }) {
     createdAt: Date.now(),
   });
   const set = (patch) => setData(d => ({ ...d, ...patch }));
+  const [bodyAutoSet, setBodyAutoSet] = useState(false);
   const setDaysPerWeek = (n) => {
     setData(d => ({ ...d, daysPerWeek: n, trainingDays: DEFAULT_TRAINING_DAYS[n] || d.trainingDays }));
   };
@@ -1187,6 +1229,15 @@ function Onboarding({ onDone }) {
             <Crumb>02 · BODY</Crumb>
             <H1>YOUR FRAME.</H1>
             <Sub>Used to calculate calories. Estimate if you don't know exactly.</Sub>
+            {bodyAutoSet && (
+              <div style={{
+                fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 2,
+                marginTop: 14, padding: '8px 12px', border: `1px solid ${C.line}`,
+                background: C.panel, display: 'inline-block',
+              }}>
+                / PRE-FILLED FOR A {data.age}YO {data.sex === 'female' ? 'FEMALE' : 'MALE'} — ADJUST AS NEEDED
+              </div>
+            )}
             <div style={{ display: 'grid', gap: 24, marginTop: 28 }}>
               <NumberSlider label="Height" value={data.height} onChange={v => set({ height: v })}
                 min={120} max={220} unit=" cm" />
@@ -1228,21 +1279,68 @@ function Onboarding({ onDone }) {
           <div>
             <Crumb>04 · OBJECTIVE</Crumb>
             <H1>WHAT'S THE MISSION?</H1>
-            <Sub>One primary focus. This shapes everything — calories, reps, the coach's tone.</Sub>
+            <Sub>Pick one or more. Your <span style={{ color: C.accent }}>first pick</span> is your <strong>primary</strong> — it drives your calorie target and rep scheme. Extra picks add flavor to your plan and coach.</Sub>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))', gap: 12, marginTop: 28 }}>
-              {goalsFor(data).map(g => (
-                <SelectCard key={g.id} active={data.goal === g.id} onClick={() => set({ goal: g.id })}>
-                  <div style={{ fontFamily: fontMono, fontSize: 10, color: data.goal === g.id ? C.accent : C.dim, letterSpacing: 2 }}>{g.tag}</div>
-                  <div style={{ fontFamily: fontDisplay, fontSize: 24, marginTop: 14, lineHeight: 1, letterSpacing: 0.5 }}>{g.name.toUpperCase()}</div>
-                  <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 14 }}>
-                    {g.surplus > 0 ? `+${g.surplus}` : g.surplus} kcal · {g.proteinPerKg}g/kg protein
-                  </div>
-                </SelectCard>
-              ))}
+              {goalsFor(data).map(g => {
+                const idx = data.goals.indexOf(g.id);
+                const isSelected = idx >= 0;
+                const isPrimary = idx === 0;
+                return (
+                  <button key={g.id} onClick={() => {
+                    const newGoals = isSelected
+                      ? data.goals.filter(x => x !== g.id)
+                      : [...data.goals, g.id];
+                    set({ goals: newGoals, goal: newGoals[0] || null });
+                  }} style={{
+                    textAlign: 'left', cursor: 'pointer', width: '100%',
+                    background: isSelected ? C.panel2 : 'transparent',
+                    border: isPrimary
+                      ? `2px solid ${C.accent}`
+                      : `1px solid ${isSelected ? C.accent : C.line}`,
+                    padding: 20, color: C.text, position: 'relative',
+                  }}>
+                    {isPrimary && (
+                      <div style={{
+                        position: 'absolute', top: 0, right: 0,
+                        background: C.accent, color: '#000',
+                        fontFamily: fontMono, fontSize: 9, letterSpacing: 2,
+                        padding: '3px 8px',
+                      }}>★ PRIMARY</div>
+                    )}
+                    <div style={{ fontFamily: fontMono, fontSize: 10, color: isSelected ? C.accent : C.dim, letterSpacing: 2 }}>{g.tag}</div>
+                    <div style={{ fontFamily: fontDisplay, fontSize: 22, marginTop: 14, lineHeight: 1, letterSpacing: 0.5 }}>{g.name.toUpperCase()}</div>
+                    <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 14 }}>
+                      {g.surplus > 0 ? `+${g.surplus}` : g.surplus} kcal · {g.proteinPerKg}g/kg protein
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+
+            {data.goals.length > 0 && (
+              <div style={{
+                marginTop: 18, padding: '12px 14px',
+                border: `1px solid ${C.accent}`, background: C.panel,
+                fontFamily: fontMono, fontSize: 11, color: C.text, letterSpacing: 1.5,
+              }}>
+                <div style={{ color: C.accent, marginBottom: 4 }}>
+                  / {data.goals.length} GOAL{data.goals.length > 1 ? 'S' : ''} SELECTED
+                </div>
+                {data.goals.map((gid, i) => {
+                  const g = goalsFor(data).find(x => x.id === gid);
+                  return (
+                    <div key={gid} style={{ fontSize: 12, marginTop: 4 }}>
+                      {i === 0 ? '★ PRIMARY · ' : `${String(i+1).padStart(2,'0')} · `}
+                      {g?.name?.toUpperCase()}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {isTeenAge && (
               <Note color={C.accent2} icon={<Shield size={12}/>} style={{ marginTop: 18 }}>
-                Aggressive fat loss is hidden in Teen Mode. "Lean Up" uses only a small deficit so you can still grow and perform.
+                Aggressive fat loss and bulk are hidden in Teen Mode. "Lean Up" uses a small deficit so you can still grow and perform.
               </Note>
             )}
           </div>
@@ -1548,7 +1646,16 @@ function Onboarding({ onDone }) {
             ? <Btn onClick={() => setStep(s => s - 1)}><ArrowLeft size={16}/> BACK</Btn>
             : <div />}
           {step < stepKeys.length - 1
-            ? <Btn primary disabled={!canAdvance() || tooYoung} onClick={() => canAdvance() && setStep(s => s + 1)}>
+            ? <Btn primary disabled={!canAdvance() || tooYoung} onClick={() => {
+                if (!canAdvance()) return;
+                const nextKey = stepKeys[step + 1];
+                if (nextKey === 'body' && !bodyAutoSet) {
+                  const avg = avgBody(data.age, data.sex);
+                  set({ height: avg.height, weight: avg.weight });
+                  setBodyAutoSet(true);
+                }
+                setStep(s => s + 1);
+              }}>
                 CONTINUE <ArrowRight size={16}/>
               </Btn>
             : <Btn primary onClick={finish}>FORGE MY PLAN <ArrowRight size={16}/></Btn>}
@@ -2925,7 +3032,8 @@ ATHLETE PROFILE:
 - Age: ${profile.age} ${teen ? '(TEEN)' : '(ADULT)'}
 - Sex: ${profile.sex}, Height: ${profile.height}cm, Weight: ${profile.weight}kg
 - Discipline: ${wtype.sub} (${profile.type})
-- Goal: ${goal.name} (${goal.tag})
+- Goal: ${goal.name} (${goal.tag})${profile.goals && profile.goals.length > 1 ? `
+- Secondary goals (give these context too, but don't change the math): ${profile.goals.slice(1).map(gid => { const sg = goalsFor(profile).find(x => x.id === gid); return sg ? sg.name : gid; }).join(', ')}` : ''}
 ${profile.targetWeight ? `- Target weight: ${profile.targetWeight}kg (${profile.targetWeight - profile.weight > 0 ? '+' : ''}${(profile.targetWeight - profile.weight).toFixed(1)}kg from current)` : ''}
 ${profile.timeline ? `- Timeline: ${profile.timeline === '3mo' ? '3 months' : profile.timeline === '6mo' ? '6 months' : profile.timeline === '12mo' ? '1 year' : 'no rush'}` : ''}
 ${profile.focusAreas && profile.focusAreas.length ? `- Focus areas: ${profile.focusAreas.join(', ')}` : ''}
