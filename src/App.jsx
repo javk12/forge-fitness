@@ -1,4 +1,4 @@
-// FORGE v2.3 — PWA support added. If you see this comment, this is the correct file.
+// FORGE v2.5 — Birthday + Physique tracker. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -7,7 +7,7 @@ import {
   Sparkles, TrendingUp, Zap, Activity, ArrowRight, ArrowLeft, User, Trash2,
   Search, Trophy, BarChart3, Loader2, CheckCircle2, Circle, RotateCcw,
   Droplet, Scale, Heart, RefreshCw, Shield, AlertCircle, Moon, Smile,
-  Settings, Clock, Pause, Play, SkipForward, Repeat, Camera, Calendar,
+  Settings, Clock, Pause, Play, SkipForward, Repeat, Camera, Calendar, Pencil, Save,
 } from 'lucide-react';
 
 /* ============================================================
@@ -51,6 +51,32 @@ const GOALS_TEEN = [
   { id: 'functional', name: 'Functional Strength',   tag: 'REAL WORLD',   surplus:  200, proteinPerKg: 1.6 },
   { id: 'mobility',   name: 'Mobility & Flex',       tag: 'SUPPLENESS',   surplus:  100, proteinPerKg: 1.4 },
 ];
+
+// Compute age from ISO birthday string (YYYY-MM-DD)
+function computeAge(birthday) {
+  if (!birthday) return null;
+  const today = new Date();
+  const bd = new Date(birthday);
+  if (isNaN(bd.getTime())) return null;
+  let age = today.getFullYear() - bd.getFullYear();
+  const m = today.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--;
+  return age;
+}
+
+// Maximum birthday (must be at least 13 years old) — for date input "max" attr
+function maxBirthday() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 13);
+  return d.toISOString().split('T')[0];
+}
+
+// Minimum birthday (max 80 years old) — for date input "min" attr
+function minBirthday() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 80);
+  return d.toISOString().split('T')[0];
+}
 
 // Population averages — used as smart starting defaults on the body step
 function avgBody(age, sex) {
@@ -842,8 +868,10 @@ export default function ForgeApp() {
   const [water, setWater] = useState({ date: todayStr(), cups: 0 });
   const [weights, setWeights] = useState([]); // [{date, kg}]
   const [wellness, setWellness] = useState({}); // { 'YYYY-MM-DD': {sleep, energy, mood} }
+  const [physiqueLog, setPhysiqueLog] = useState([]); // [{at, date, thumb, rating, strengths[], focus[], encouragement}]
   const [completedDays, setCompletedDays] = useState({});
   const [tab, setTab] = useState('home');
+  const [editing, setEditing] = useState(false);
 
   // Fonts
   useEffect(() => {
@@ -858,13 +886,14 @@ export default function ForgeApp() {
   // Load state
   useEffect(() => {
     (async () => {
-      const [p, f, w, wt, wl, cd] = await Promise.all([
+      const [p, f, w, wt, wl, cd, pq] = await Promise.all([
         loadKey('forge2:profile', null),
         loadKey('forge2:foodLog', null),
         loadKey('forge2:water', null),
         loadKey('forge2:weights', []),
         loadKey('forge2:wellness', {}),
         loadKey('forge2:completedDays', {}),
+        loadKey('forge2:physique', []),
       ]);
       if (p) {
         // Migration: older profiles don't have trainingDays
@@ -884,6 +913,7 @@ export default function ForgeApp() {
       if (wt) setWeights(wt);
       if (wl) setWellness(wl);
       if (cd) setCompletedDays(cd);
+      if (pq) setPhysiqueLog(pq);
       setLoaded(true);
     })();
   }, []);
@@ -895,6 +925,7 @@ export default function ForgeApp() {
   useEffect(() => { if (loaded) storage.set('forge2:weights', JSON.stringify(weights)).catch(()=>{}); }, [weights, loaded]);
   useEffect(() => { if (loaded) storage.set('forge2:wellness', JSON.stringify(wellness)).catch(()=>{}); }, [wellness, loaded]);
   useEffect(() => { if (loaded) storage.set('forge2:completedDays', JSON.stringify(completedDays)).catch(()=>{}); }, [completedDays, loaded]);
+  useEffect(() => { if (loaded) storage.set('forge2:physique', JSON.stringify(physiqueLog)).catch(()=>{}); }, [physiqueLog, loaded]);
 
   const reset = async () => {
     setProfile(null);
@@ -902,10 +933,11 @@ export default function ForgeApp() {
     setWater({ date: todayStr(), cups: 0 });
     setWeights([]);
     setWellness({});
+    setPhysiqueLog([]);
     setCompletedDays({});
     setTab('home');
     try {
-      for (const k of ['forge2:profile','forge2:foodLog','forge2:water','forge2:weights','forge2:wellness','forge2:completedDays']) {
+      for (const k of ['forge2:profile','forge2:foodLog','forge2:water','forge2:weights','forge2:wellness','forge2:completedDays','forge2:physique']) {
         await storage.delete(k);
       }
     } catch(_){}
@@ -929,7 +961,7 @@ export default function ForgeApp() {
 
   return (
     <div style={{ background: C.bg, color: C.text, minHeight: '100vh', fontFamily: fontBody }}>
-      <Header profile={profile} streak={streak} onReset={reset} nutrition={nutrition} />
+      <Header profile={profile} streak={streak} onEdit={() => setEditing(true)} nutrition={nutrition} />
 
       <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 20px 120px' }}>
         {tab === 'home' && (
@@ -948,7 +980,8 @@ export default function ForgeApp() {
             foodLog={foodLog} setFoodLog={setFoodLog}
             water={water} setWater={setWater}
             weights={weights} setWeights={setWeights}
-            wellness={wellness} setWellness={setWellness} />
+            wellness={wellness} setWellness={setWellness}
+            physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog} />
         )}
         {tab === 'coach' && (
           <Coach profile={profile} nutrition={nutrition} consumed={consumed}
@@ -959,7 +992,387 @@ export default function ForgeApp() {
 
       <BottomNav tab={tab} setTab={setTab} />
       <InstallPrompt />
+      {editing && (
+        <EditProfile
+          profile={profile}
+          onSave={(updated) => { setProfile(updated); storage.set('forge2:profile', updated); }}
+          onClose={() => setEditing(false)}
+          onReset={() => { setEditing(false); reset(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ============================================================
+// EDIT PROFILE
+// ============================================================
+// Full-screen overlay for editing profile data without losing
+// food logs, weight history, streak, etc.
+function EditProfile({ profile, onSave, onClose, onReset }) {
+  const [d, setD] = useState({ ...profile });
+  const set = (patch) => setD(prev => ({ ...prev, ...patch }));
+  const isTeenAge = d.age >= 13 && d.age < 18;
+  const allGoals = isTeenAge ? GOALS_TEEN : GOALS_ADULT;
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const toggleGoal = (id) => {
+    const has = d.goals?.includes(id);
+    const next = has ? d.goals.filter(g => g !== id) : [...(d.goals || []), id];
+    set({ goals: next, goal: next[0] || null });
+  };
+  const toggle = (key, val) => {
+    const arr = d[key] || [];
+    const has = arr.includes(val);
+    set({ [key]: has ? arr.filter(x => x !== val) : [...arr, val] });
+  };
+
+  const save = () => {
+    if (!d.goals || d.goals.length === 0) {
+      alert('Pick at least one goal before saving.');
+      return;
+    }
+    onSave({ ...d, goal: d.goals[0] });
+    onClose();
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: C.bg, color: C.text,
+      zIndex: 300, overflow: 'auto', fontFamily: fontBody,
+    }}>
+      {/* Sticky top bar */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        borderBottom: `1px solid ${C.line}`, background: 'rgba(8,8,10,0.96)',
+        backdropFilter: 'blur(10px)',
+      }}>
+        <div style={{ maxWidth: 720, margin: '0 auto', padding: '14px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 2 }}>/ EDIT PROFILE</div>
+            <div style={{ fontFamily: fontDisplay, fontSize: 22, letterSpacing: 1, lineHeight: 1, marginTop: 2 }}>YOUR SETUP</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{
+            border: `1px solid ${C.line}`, background: 'transparent', color: C.text,
+            padding: '6px 8px', cursor: 'pointer',
+          }}><X size={16} /></button>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 720, margin: '0 auto', padding: '24px 20px 140px' }}>
+
+        {/* ===== BASICS ===== */}
+        <SectionTitle>BASICS</SectionTitle>
+        <Field label="Name">
+          <input value={d.name || ''} onChange={e => set({ name: e.target.value })}
+            style={inputStyle} placeholder="What should we call you?" />
+        </Field>
+        <Field label="Birthday">
+          <input type="date" value={d.birthday || ''}
+            min={minBirthday()} max={maxBirthday()}
+            onChange={e => {
+              const bd = e.target.value;
+              const a = computeAge(bd);
+              set({ birthday: bd, age: a || d.age });
+            }}
+            style={{ ...inputStyle, colorScheme: 'dark' }} />
+          {d.birthday && d.age && (
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2, marginTop: 6 }}>
+              / {d.age} YEARS OLD
+            </div>
+          )}
+        </Field>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2, marginBottom: 8 }}>SEX</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['male', 'female'].map(s => (
+              <button key={s} onClick={() => set({ sex: s })} style={{
+                padding: '10px 16px', cursor: 'pointer',
+                background: d.sex === s ? C.accent : 'transparent',
+                border: `1px solid ${d.sex === s ? C.accent : C.line}`,
+                color: d.sex === s ? '#000' : C.text,
+                fontFamily: fontMono, fontSize: 12, letterSpacing: 1,
+              }}>{s.toUpperCase()}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* ===== BODY ===== */}
+        <SectionTitle>BODY</SectionTitle>
+        <NumberSlider label="Height" value={d.height} onChange={v => set({ height: v })} min={120} max={220} unit=" cm" />
+        <div style={{ marginTop: 18 }}>
+          <NumberSlider label="Weight" value={d.weight} onChange={v => set({ weight: v })} min={30} max={200} unit=" kg" />
+        </div>
+
+        {/* ===== GOALS ===== */}
+        <SectionTitle>GOALS</SectionTitle>
+        <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginBottom: 12 }}>
+          Tap any. First tap = primary (drives calorie target).
+        </div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {allGoals.map((g) => {
+            const on = (d.goals || []).includes(g.id);
+            const isPrimary = (d.goals || [])[0] === g.id;
+            return (
+              <button key={g.id} onClick={() => toggleGoal(g.id)} style={{
+                position: 'relative', textAlign: 'left', padding: '12px 14px',
+                background: on ? C.panel : 'transparent', cursor: 'pointer',
+                border: `${isPrimary ? 2 : 1}px solid ${on ? C.accent : C.line}`,
+              }}>
+                {isPrimary && (
+                  <div style={{
+                    position: 'absolute', top: 6, right: 8,
+                    fontFamily: fontMono, fontSize: 9, color: C.accent, letterSpacing: 1.5,
+                  }}>★ PRIMARY</div>
+                )}
+                <div style={{ fontFamily: fontMono, fontSize: 10, color: on ? C.accent : C.dim, letterSpacing: 2 }}>{g.tag}</div>
+                <div style={{ fontFamily: fontDisplay, fontSize: 22, letterSpacing: 0.5, marginTop: 2 }}>{g.name.toUpperCase()}</div>
+                <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 4 }}>
+                  {g.surplus > 0 ? '+' : ''}{g.surplus} kcal · {g.proteinPerKg}g/kg protein
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ===== GOAL DETAILS ===== */}
+        <SectionTitle>GOAL DETAILS</SectionTitle>
+        {!isTeenAge && (
+          <div style={{ marginBottom: 18 }}>
+            <NumberSlider label="Dream weight" value={d.targetWeight ?? d.weight}
+              onChange={v => set({ targetWeight: v })} min={30} max={200} unit=" kg" />
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2, marginTop: 6 }}>
+              {(() => {
+                const target = d.targetWeight ?? d.weight;
+                const diff = +(target - d.weight).toFixed(1);
+                if (Math.abs(diff) < 0.5) return '/ MAINTAINING';
+                if (diff < 0) return `/ LOSING ${Math.abs(diff)} KG`;
+                return `/ GAINING ${diff} KG`;
+              })()}
+            </div>
+          </div>
+        )}
+
+        <Field label="Timeline">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {[{ id: '3mo', label: '3 MONTHS' }, { id: '6mo', label: '6 MONTHS' },
+              { id: '12mo', label: '1 YEAR' }, { id: 'norush', label: 'NO RUSH' }].map(t => {
+              const on = d.timeline === t.id;
+              return (
+                <button key={t.id} onClick={() => set({ timeline: t.id })} style={{
+                  padding: '8px 14px', cursor: 'pointer',
+                  background: on ? C.accent : 'transparent',
+                  border: `1px solid ${on ? C.accent : C.line}`,
+                  color: on ? '#000' : C.text,
+                  fontFamily: fontMono, fontSize: 12, letterSpacing: 1,
+                }}>{t.label}</button>
+              );
+            })}
+          </div>
+        </Field>
+
+        <Field label="Focus areas">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['Chest','Back','Shoulders','Arms','Legs','Glutes','Core'].map(a => {
+              const on = (d.focusAreas || []).includes(a);
+              return (
+                <button key={a} onClick={() => toggle('focusAreas', a)} style={{
+                  padding: '6px 12px', cursor: 'pointer',
+                  background: on ? C.accent : 'transparent',
+                  border: `1px solid ${on ? C.accent : C.line}`,
+                  color: on ? '#000' : C.text, fontSize: 13, fontFamily: fontMono, letterSpacing: 1,
+                }}>{a.toUpperCase()}</button>
+              );
+            })}
+          </div>
+        </Field>
+
+        <Field label="Specific milestones">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['First pull-up','10 pull-ups','Bench bodyweight','Squat 1.5x bw',
+              'Deadlift 2x bw','Handstand 30s','Muscle-up','Run 5K','Run 10K',
+              'Visible abs','Touch toes','Splits','Pistol squat'].map(g => {
+              const on = (d.strengthGoals || []).includes(g);
+              return (
+                <button key={g} onClick={() => toggle('strengthGoals', g)} style={{
+                  padding: '6px 12px', cursor: 'pointer',
+                  background: on ? C.accent : 'transparent',
+                  border: `1px solid ${on ? C.accent : C.line}`,
+                  color: on ? '#000' : C.text, fontSize: 13, fontFamily: fontMono, letterSpacing: 1,
+                }}>{g.toUpperCase()}</button>
+              );
+            })}
+          </div>
+        </Field>
+
+        {/* ===== TRAINING ===== */}
+        <SectionTitle>TRAINING</SectionTitle>
+        <Field label="Experience">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {[
+              { id: 'beginner', label: 'BEGINNER' },
+              { id: 'intermediate', label: 'INTERMEDIATE' },
+              { id: 'advanced', label: 'ADVANCED' },
+            ].map(e => (
+              <button key={e.id} onClick={() => set({ experience: e.id })} style={{
+                padding: '8px 14px', cursor: 'pointer',
+                background: d.experience === e.id ? C.accent : 'transparent',
+                border: `1px solid ${d.experience === e.id ? C.accent : C.line}`,
+                color: d.experience === e.id ? '#000' : C.text,
+                fontFamily: fontMono, fontSize: 12, letterSpacing: 1,
+              }}>{e.label}</button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="Days per week">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {[3, 4, 5, 6].map(n => (
+              <button key={n} onClick={() => set({
+                daysPerWeek: n,
+                trainingDays: DEFAULT_TRAINING_DAYS[n] || d.trainingDays,
+              })} style={{
+                padding: '8px 16px', cursor: 'pointer',
+                background: d.daysPerWeek === n ? C.accent : 'transparent',
+                border: `1px solid ${d.daysPerWeek === n ? C.accent : C.line}`,
+                color: d.daysPerWeek === n ? '#000' : C.text,
+                fontFamily: fontMono, fontSize: 14,
+              }}>{n}</button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="Session length (minutes)">
+          <NumberSlider label="" value={d.sessionLength} onChange={v => set({ sessionLength: v })}
+            min={20} max={120} step={5} unit=" min" />
+        </Field>
+
+        {/* ===== NUTRITION ===== */}
+        <SectionTitle>NUTRITION</SectionTitle>
+        <Field label="Diet">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['omnivore','vegetarian','vegan','pescatarian','halal','kosher'].map(diet => (
+              <button key={diet} onClick={() => set({ diet })} style={{
+                padding: '8px 14px', cursor: 'pointer',
+                background: d.diet === diet ? C.accent : 'transparent',
+                border: `1px solid ${d.diet === diet ? C.accent : C.line}`,
+                color: d.diet === diet ? '#000' : C.text,
+                fontFamily: fontMono, fontSize: 12, letterSpacing: 1,
+              }}>{diet.toUpperCase()}</button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="Allergens / avoid">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['dairy','gluten','nuts','eggs','soy','shellfish'].map(a => {
+              const on = (d.allergens || []).includes(a);
+              return (
+                <button key={a} onClick={() => toggle('allergens', a)} style={{
+                  padding: '6px 12px', cursor: 'pointer',
+                  background: on ? C.accent : 'transparent',
+                  border: `1px solid ${on ? C.accent : C.line}`,
+                  color: on ? '#000' : C.text, fontSize: 13, fontFamily: fontMono, letterSpacing: 1,
+                }}>{a.toUpperCase()}</button>
+              );
+            })}
+          </div>
+        </Field>
+
+        {/* ===== HEALTH ===== */}
+        <SectionTitle>HEALTH & RECOVERY</SectionTitle>
+        <Field label="Injuries / sensitivities">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['lower back','knees','shoulders','wrists','elbows','neck'].map(i => {
+              const on = (d.injuries || []).includes(i);
+              return (
+                <button key={i} onClick={() => toggle('injuries', i)} style={{
+                  padding: '6px 12px', cursor: 'pointer',
+                  background: on ? C.accent : 'transparent',
+                  border: `1px solid ${on ? C.accent : C.line}`,
+                  color: on ? '#000' : C.text, fontSize: 13, fontFamily: fontMono, letterSpacing: 1,
+                }}>{i.toUpperCase()}</button>
+              );
+            })}
+          </div>
+        </Field>
+
+        <Field label="Average sleep (hours)">
+          <NumberSlider label="" value={d.sleep || 7} onChange={v => set({ sleep: v })}
+            min={4} max={12} step={1} unit=" h" />
+        </Field>
+
+        <Field label="What drives you">
+          <textarea value={d.motivation || ''}
+            onChange={e => set({ motivation: e.target.value })}
+            placeholder="Coach uses this to push you on hard days." rows={3}
+            style={{ ...inputStyle, fontFamily: fontBody, resize: 'vertical' }} />
+        </Field>
+
+        {/* ===== DANGER ZONE ===== */}
+        <div style={{ marginTop: 48, padding: 18, border: `1px dashed ${C.danger}` }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: C.danger, letterSpacing: 2, marginBottom: 6 }}>/ DANGER ZONE</div>
+          <div style={{ fontFamily: fontDisplay, fontSize: 22, letterSpacing: 0.5, marginBottom: 6 }}>RESET EVERYTHING</div>
+          <div style={{ fontFamily: fontBody, fontSize: 13, color: C.dim, marginBottom: 14 }}>
+            Wipes your entire profile, food log, water, weights, wellness check-ins, and streak. You'll start fresh from onboarding. <strong style={{ color: C.text }}>This can't be undone.</strong>
+          </div>
+          {!confirmReset ? (
+            <button onClick={() => setConfirmReset(true)} style={{
+              background: 'transparent', color: C.danger, border: `1px solid ${C.danger}`,
+              padding: '10px 14px', cursor: 'pointer',
+              fontFamily: fontMono, fontSize: 11, letterSpacing: 2, fontWeight: 700,
+            }}>RESET PROFILE</button>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={onReset} style={{
+                background: C.danger, color: '#000', border: 0,
+                padding: '10px 14px', cursor: 'pointer',
+                fontFamily: fontMono, fontSize: 11, letterSpacing: 2, fontWeight: 700,
+              }}>YES, WIPE EVERYTHING</button>
+              <button onClick={() => setConfirmReset(false)} style={{
+                background: 'transparent', color: C.text, border: `1px solid ${C.line}`,
+                padding: '10px 14px', cursor: 'pointer',
+                fontFamily: fontMono, fontSize: 11, letterSpacing: 2,
+              }}>CANCEL</button>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Sticky save bar */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 20,
+        background: 'rgba(8,8,10,0.96)', backdropFilter: 'blur(10px)',
+        borderTop: `1px solid ${C.line}`, padding: '12px 20px',
+      }}>
+        <div style={{ maxWidth: 720, margin: '0 auto', display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{
+            flex: 1, background: 'transparent', color: C.text, border: `1px solid ${C.line}`,
+            padding: '14px', cursor: 'pointer',
+            fontFamily: fontMono, fontSize: 12, letterSpacing: 2,
+          }}>CANCEL</button>
+          <button onClick={save} style={{
+            flex: 2, background: C.accent, color: '#000', border: 0,
+            padding: '14px', cursor: 'pointer',
+            fontFamily: fontMono, fontSize: 12, letterSpacing: 2, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}>
+            <Save size={14} /> SAVE CHANGES
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ children }) {
+  return (
+    <div style={{
+      fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 3,
+      marginTop: 36, marginBottom: 14, paddingBottom: 8,
+      borderBottom: `1px solid ${C.line}`,
+    }}>/ {children}</div>
   );
 }
 
@@ -1090,7 +1503,7 @@ function InstallPrompt() {
 // HEADER
 // ============================================================
 
-function Header({ profile, streak, onReset, nutrition }) {
+function Header({ profile, streak, onEdit, nutrition }) {
   const teen = nutrition.isTeenMode;
   return (
     <header style={{
@@ -1114,11 +1527,11 @@ function Header({ profile, streak, onReset, nutrition }) {
             <Flame size={16} style={{ color: streak > 0 ? C.accent2 : C.dim }} />
             <span style={{ fontFamily: fontMono, fontSize: 13 }}>{streak}d</span>
           </div>
-          <button onClick={onReset} title="Reset profile" style={{
-            border: `1px solid ${C.line}`, background: 'transparent', color: C.dim,
+          <button onClick={onEdit} title="Edit profile" style={{
+            border: `1px solid ${C.line}`, background: 'transparent', color: C.text,
             padding: '6px 8px', cursor: 'pointer',
           }}>
-            <RotateCcw size={12} />
+            <Pencil size={12} />
           </button>
         </div>
       </div>
@@ -1171,7 +1584,7 @@ function BottomNav({ tab, setTab }) {
 function Onboarding({ onDone }) {
   const [step, setStep] = useState(0);
   const [data, setData] = useState({
-    name: '', age: 18, sex: 'male',
+    name: '', age: 18, sex: 'male', birthday: '',
     height: 175, weight: 75,
     type: null, goal: null, goals: [],
     targetWeight: null, timeline: null,
@@ -1227,7 +1640,7 @@ function Onboarding({ onDone }) {
   const canAdvance = () => {
     switch (currentKey) {
       case 'welcome': return true;
-      case 'basics': return data.name.trim().length > 0 && data.age >= 13 && data.age <= 100;
+      case 'basics': return data.name.trim().length > 0 && !!data.birthday && data.age >= 13 && data.age <= 100;
       case 'teenSafety': return data.teenAcknowledged;
       case 'body': return data.height > 100 && data.height < 250 && data.weight > 25 && data.weight < 300;
       case 'type': return !!data.type;
@@ -1305,8 +1718,21 @@ function Onboarding({ onDone }) {
                   { id: 'male', label: 'MALE' }, { id: 'female', label: 'FEMALE' },
                 ]}/>
               </Field>
-              <NumberSlider label="Age (years)" value={data.age} onChange={v => set({ age: v })}
-                min={13} max={80} unit="" />
+              <Field label="Birthday">
+                <input type="date" value={data.birthday || ''}
+                  min={minBirthday()} max={maxBirthday()}
+                  onChange={e => {
+                    const bd = e.target.value;
+                    const a = computeAge(bd);
+                    set({ birthday: bd, age: a || data.age });
+                  }}
+                  style={{ ...inputStyle, colorScheme: 'dark' }} />
+                {data.birthday && data.age && (
+                  <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2, marginTop: 8 }}>
+                    / YOU ARE {data.age} YEARS OLD
+                  </div>
+                )}
+              </Field>
               {data.age >= 13 && data.age < 18 && (
                 <Note color={C.accent2} icon={<Shield size={12}/>}>
                   Teen Mode will be enabled. We'll adjust nutrition and goals for safe, healthy development.
@@ -2458,12 +2884,13 @@ function Tracker(props) {
       </section>
 
       {/* Sub-tabs */}
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1, border: `1px solid ${C.line}`, background: C.line }}>
+      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 1, border: `1px solid ${C.line}`, background: C.line }}>
         {[
           { id: 'food',     label: 'FOOD',     Icon: Apple },
           { id: 'water',    label: 'WATER',    Icon: Droplet },
           { id: 'weight',   label: 'WEIGHT',   Icon: Scale },
           { id: 'wellness', label: 'WELLNESS', Icon: Heart },
+          { id: 'physique', label: 'PHYSIQUE', Icon: Camera },
         ].map(({ id, label, Icon }) => {
           const active = sub === id;
           return (
@@ -2484,6 +2911,7 @@ function Tracker(props) {
       {sub === 'water' && <WaterTracker {...props} />}
       {sub === 'weight' && <WeightTracker {...props} />}
       {sub === 'wellness' && <WellnessTracker {...props} />}
+      {sub === 'physique' && <PhysiqueTracker {...props} />}
     </div>
   );
 }
@@ -3106,6 +3534,352 @@ function Scale10({ v, min = 1, max = 10, suffix = '' }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: fontMono, fontSize: 9, color: C.dim, marginTop: 4 }}>
       <span>{min}{suffix}</span><span>{Math.round((min+max)/2)}{suffix}</span><span>{max}{suffix}</span>
+    </div>
+  );
+}
+
+// ============================================================
+// PHYSIQUE TRACKER — monthly progress photos + AI rating
+// ============================================================
+
+// Resize an image file to max width and return base64 data URL
+function resizeImageFile(file, maxWidth = 600, quality = 0.78) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const ratio = Math.min(1, maxWidth / img.width);
+      const w = Math.round(img.width * ratio);
+      const h = Math.round(img.height * ratio);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        const base64 = dataUrl.split(',')[1];
+        resolve({ dataUrl, base64, mediaType: 'image/jpeg' });
+      } catch (err) { reject(err); }
+    };
+    img.onerror = () => reject(new Error('Could not load image.'));
+    img.src = url;
+  });
+}
+
+function PhysiqueTracker({ profile, physiqueLog, setPhysiqueLog }) {
+  const fileRef = useRef(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState(null);
+  const [current, setCurrent] = useState(null); // pending upload preview
+  const [showHistoryItem, setShowHistoryItem] = useState(null);
+
+  const sortedLog = useMemo(() =>
+    [...(physiqueLog || [])].sort((a, b) => b.at - a.at),
+    [physiqueLog]
+  );
+  const lastCheck = sortedLog[0];
+  const COOLDOWN_DAYS = 28;
+  const daysSinceLast = lastCheck ? Math.floor((Date.now() - lastCheck.at) / (1000 * 60 * 60 * 24)) : null;
+  const canCheckIn = !lastCheck || daysSinceLast >= COOLDOWN_DAYS;
+  const daysUntilNext = lastCheck && !canCheckIn ? COOLDOWN_DAYS - daysSinceLast : 0;
+
+  const teen = profile.age >= 13 && profile.age < 18;
+
+  const handleFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError("That doesn't look like an image."); return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setError('Image too large (max 15MB).'); return;
+    }
+    setError(null);
+    try {
+      const resized = await resizeImageFile(file, 600, 0.78);
+      setCurrent(resized);
+    } catch (err) {
+      setError(`Couldn't process photo: ${err.message}`);
+    }
+  };
+
+  const cancelPhoto = () => {
+    setCurrent(null);
+    setError(null);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const analyze = async () => {
+    if (!current) return;
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const goalsList = (profile.goals || [])
+        .map(gid => {
+          const g = (teen ? GOALS_TEEN : GOALS_ADULT).find(x => x.id === gid);
+          return g ? g.name : gid;
+        })
+        .join(', ') || 'general fitness';
+
+      const system = `You analyze physique progress photos for the FORGE fitness app. Be honest, kind, and useful. Never body-shame.
+
+USER PROFILE:
+- Age: ${profile.age}${teen ? ' (TEEN — extra care, see below)' : ''}
+- Sex: ${profile.sex}
+- Goals: ${goalsList}
+- Focus areas they care about: ${(profile.focusAreas || []).join(', ') || 'none specified'}
+- Specific milestones they want: ${(profile.strengthGoals || []).join(', ') || 'none specified'}
+- Training experience: ${profile.experience}
+
+${teen ? `TEEN-SPECIFIC RULES (NON-NEGOTIABLE):
+- DO NOT comment on body fat, leanness, or weight in any way.
+- DO NOT compare them to "ideal" physiques or athletes.
+- Focus ONLY on: posture, visible form/symmetry, muscle development (in terms of strength potential, not size).
+- Reframe rating as "development score" — about progress, not appearance.
+- Be encouraging — teens are still developing, their body will change a lot.
+- If anything in the photo concerns you (visible signs of disordered eating, excessive thinness), set rating to null and use 'encouragement' to gently suggest they talk to a trusted adult.
+` : `ADULT RULES:
+- You can be honest about body composition, muscle development, posture.
+- Never use shaming language. Frame everything constructively.
+- Use specific, observable details — not generic praise.
+`}
+
+RETURN ONLY VALID JSON, no markdown, no preamble:
+{
+  "rating": number 1-10 (or null if concerned),
+  "strengths": [1-3 short observations about what's progressing well, max 80 chars each],
+  "focus": [1-3 short actionable areas to focus on next, max 80 chars each],
+  "encouragement": "one short, specific sentence — not generic"
+}`;
+
+      const data = await callClaude({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 800,
+        system,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: current.mediaType, data: current.base64 } },
+            { type: 'text', text: 'Analyze this physique progress photo. JSON only.' }
+          ]
+        }]
+      });
+      const text = (data.content || []).map(b => b.type === 'text' ? b.text : '').join('');
+      const cleaned = text.replace(/```json|```/g, '').trim();
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      const jsonStr = start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+      const parsed = JSON.parse(jsonStr);
+
+      const entry = {
+        id: Math.random().toString(36).slice(2),
+        at: Date.now(),
+        date: todayStr(),
+        thumb: current.dataUrl,
+        rating: parsed.rating,
+        strengths: parsed.strengths || [],
+        focus: parsed.focus || [],
+        encouragement: parsed.encouragement || '',
+      };
+      setPhysiqueLog(prev => [...(prev || []), entry]);
+      setCurrent(null);
+      if (fileRef.current) fileRef.current.value = '';
+    } catch (err) {
+      setError(`Couldn't analyze: ${err.message}. Try a clearer, well-lit photo.`);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const deleteEntry = (id) => {
+    if (!confirm('Delete this physique check permanently?')) return;
+    setPhysiqueLog(prev => (prev || []).filter(e => e.id !== id));
+    setShowHistoryItem(null);
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 24 }}>
+      <div style={{ border: `1px solid ${C.line}`, padding: 20, background: C.panel }}>
+        <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Camera size={14}/> MONTHLY PHYSIQUE CHECK
+        </div>
+        <div style={{ fontFamily: fontDisplay, fontSize: 28, letterSpacing: 0.5, lineHeight: 1, marginBottom: 8 }}>
+          {canCheckIn ? 'READY FOR A NEW CHECK.' : `NEXT CHECK IN ${daysUntilNext} DAY${daysUntilNext === 1 ? '' : 'S'}.`}
+        </div>
+        <div style={{ fontFamily: fontBody, fontSize: 13, color: C.dim, lineHeight: 1.5 }}>
+          Once a month, snap a progress photo. The AI gives you an honest rating and tells you what to focus on. Photos stay on your device — they're only sent to the AI for analysis, never stored anywhere else.
+        </div>
+
+        {/* Tips for a good photo */}
+        {canCheckIn && !current && (
+          <div style={{ marginTop: 16, padding: 14, border: `1px solid ${C.line}`, fontFamily: fontMono, fontSize: 11, color: C.dim, lineHeight: 1.7 }}>
+            <div style={{ color: C.text, letterSpacing: 2, marginBottom: 6 }}>FOR BEST RESULTS</div>
+            · Good lighting, plain background<br/>
+            · Same pose each month (front, relaxed)<br/>
+            · Same time of day<br/>
+            · Wear the same thing if you can
+          </div>
+        )}
+
+        <input ref={fileRef} type="file" accept="image/*" capture="environment"
+          onChange={handleFile} style={{ display: 'none' }} />
+
+        {canCheckIn && !current && (
+          <button onClick={() => fileRef.current?.click()} style={{
+            marginTop: 16, background: C.accent, color: '#000', border: 0,
+            padding: '14px 20px', cursor: 'pointer',
+            fontFamily: fontMono, fontSize: 12, letterSpacing: 2, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+          }}>
+            <Camera size={16}/> TAKE PROGRESS PHOTO
+          </button>
+        )}
+
+        {!canCheckIn && (
+          <div style={{ marginTop: 14, fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 1 }}>
+            Last check: {lastCheck.date} · Rating: {lastCheck.rating != null ? `${lastCheck.rating}/10` : '—'}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ marginTop: 14, padding: 12, border: `1px solid ${C.danger}`, color: C.danger, fontSize: 13 }}>
+            {error}
+          </div>
+        )}
+
+        {/* Pending photo preview */}
+        {current && (
+          <div style={{ marginTop: 18 }}>
+            <img src={current.dataUrl} alt="Preview" style={{
+              width: '100%', maxWidth: 280, display: 'block',
+              border: `1px solid ${C.line}`,
+            }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <button onClick={analyze} disabled={analyzing} style={{
+                background: C.accent, color: '#000', border: 0, cursor: analyzing ? 'wait' : 'pointer',
+                padding: '12px 18px', fontFamily: fontMono, fontSize: 12, letterSpacing: 2, fontWeight: 700,
+                opacity: analyzing ? 0.6 : 1,
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+              }}>
+                {analyzing ? <><Loader2 size={14} className="spin"/> ANALYZING…</> : <><Sparkles size={14}/> ANALYZE</>}
+              </button>
+              <button onClick={cancelPhoto} disabled={analyzing} style={{
+                background: 'transparent', color: C.text, border: `1px solid ${C.line}`,
+                padding: '12px 18px', cursor: analyzing ? 'wait' : 'pointer',
+                fontFamily: fontMono, fontSize: 12, letterSpacing: 2,
+              }}>CANCEL</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Latest result */}
+      {lastCheck && !current && (
+        <div>
+          <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 10 }}>
+            / LATEST · {lastCheck.date}
+          </div>
+          <PhysiqueResultCard entry={lastCheck} expanded onDelete={() => deleteEntry(lastCheck.id)} />
+        </div>
+      )}
+
+      {/* History */}
+      {sortedLog.length > 1 && (
+        <div>
+          <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 10 }}>
+            / HISTORY · {sortedLog.length - 1} EARLIER CHECK{sortedLog.length - 1 === 1 ? '' : 'S'}
+          </div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {sortedLog.slice(1).map(entry => (
+              <button key={entry.id}
+                onClick={() => setShowHistoryItem(showHistoryItem === entry.id ? null : entry.id)}
+                style={{
+                  textAlign: 'left', cursor: 'pointer', padding: 0,
+                  border: `1px solid ${C.line}`, background: C.panel, color: C.text,
+                }}>
+                {showHistoryItem === entry.id ? (
+                  <div style={{ padding: 16 }}>
+                    <PhysiqueResultCard entry={entry} expanded onDelete={() => deleteEntry(entry.id)} embedded />
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12 }}>
+                    <img src={entry.thumb} alt="" style={{ width: 56, height: 56, objectFit: 'cover' }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2 }}>{entry.date}</div>
+                      <div style={{ fontFamily: fontDisplay, fontSize: 22, lineHeight: 1, marginTop: 2 }}>
+                        <span style={{ color: C.accent }}>{entry.rating != null ? entry.rating : '—'}</span>
+                        <span style={{ color: C.dim, fontSize: 14 }}> / 10</span>
+                      </div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: C.dim }} />
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } } .spin { animation: spin 1s linear infinite; }`}</style>
+    </div>
+  );
+}
+
+function PhysiqueResultCard({ entry, expanded, onDelete, embedded }) {
+  return (
+    <div style={{
+      border: embedded ? 0 : `1px solid ${C.accent}`,
+      background: embedded ? 'transparent' : C.panel,
+      padding: embedded ? 0 : 20,
+    }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 16, alignItems: 'start' }}>
+        <img src={entry.thumb} alt="Physique check" style={{
+          width: '100%', display: 'block', border: `1px solid ${C.line}`,
+        }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2 }}>RATING</div>
+          <div style={{ fontFamily: fontDisplay, fontSize: 56, color: C.accent, lineHeight: 1, letterSpacing: 1 }}>
+            {entry.rating != null ? entry.rating : '—'}
+            <span style={{ fontSize: 20, color: C.dim }}> / 10</span>
+          </div>
+        </div>
+      </div>
+
+      {entry.strengths && entry.strengths.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 2, marginBottom: 6 }}>/ WHAT'S PROGRESSING</div>
+          {entry.strengths.map((s, i) => (
+            <div key={i} style={{ fontFamily: fontBody, fontSize: 14, lineHeight: 1.5, padding: '4px 0' }}>· {s}</div>
+          ))}
+        </div>
+      )}
+
+      {entry.focus && entry.focus.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent2, letterSpacing: 2, marginBottom: 6 }}>/ FOCUS NEXT</div>
+          {entry.focus.map((s, i) => (
+            <div key={i} style={{ fontFamily: fontBody, fontSize: 14, lineHeight: 1.5, padding: '4px 0' }}>→ {s}</div>
+          ))}
+        </div>
+      )}
+
+      {entry.encouragement && (
+        <div style={{ marginTop: 14, padding: 12, borderLeft: `2px solid ${C.accent}`, fontFamily: fontBody, fontSize: 13, color: C.text, fontStyle: 'italic', lineHeight: 1.5 }}>
+          "{entry.encouragement}"
+        </div>
+      )}
+
+      {onDelete && (
+        <button onClick={onDelete} style={{
+          marginTop: 16, background: 'transparent', color: C.dim, border: `1px solid ${C.line}`,
+          padding: '6px 10px', cursor: 'pointer',
+          fontFamily: fontMono, fontSize: 10, letterSpacing: 1.5,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          <Trash2 size={11}/> DELETE
+        </button>
+      )}
     </div>
   );
 }
