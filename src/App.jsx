@@ -1,4 +1,4 @@
-// FORGE v2.5 — Birthday + Physique tracker. If you see this comment, this is the correct file.
+// FORGE v2.6 — Rank system + tab restructure. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -157,6 +157,116 @@ const DIETS = [
 const ALLERGENS = ['Dairy', 'Gluten', 'Nuts', 'Eggs', 'Shellfish', 'Soy'];
 
 const COMMON_INJURIES = ['Lower back', 'Knees', 'Shoulders', 'Elbows', 'Wrists', 'Hips', 'Neck'];
+
+// ============================================================
+// STRENGTH RANK SYSTEM
+// ============================================================
+// Ranks based on estimated 1-rep-max relative to bodyweight.
+
+const RANK_TIERS = [
+  { id: 0, name: 'IRON',     color: '#9a9a9a', glow: 'rgba(154,154,154,0.4)' },
+  { id: 1, name: 'BRONZE',   color: '#cd7f32', glow: 'rgba(205,127,50,0.4)' },
+  { id: 2, name: 'STEEL',    color: '#aebfd4', glow: 'rgba(174,191,212,0.4)' },
+  { id: 3, name: 'SILVER',   color: '#d4d4dc', glow: 'rgba(212,212,220,0.4)' },
+  { id: 4, name: 'GOLD',     color: '#ffd23f', glow: 'rgba(255,210,63,0.45)' },
+  { id: 5, name: 'TITANIUM', color: '#7fe7ff', glow: 'rgba(127,231,255,0.45)' },
+  { id: 6, name: 'MYTHIC',   color: '#d8ff36', glow: 'rgba(216,255,54,0.5)' },
+];
+
+// The lifts we rank. Each has a label and which equipment it needs.
+const RANK_LIFTS = [
+  { id: 'bench',    name: 'Bench Press' },
+  { id: 'squat',    name: 'Back Squat' },
+  { id: 'deadlift', name: 'Deadlift' },
+  { id: 'ohp',      name: 'Overhead Press' },
+  { id: 'row',      name: 'Barbell Row' },
+  { id: 'pullup',   name: 'Weighted Pull-up' },
+];
+
+// Bodyweight-ratio thresholds to REACH each tier (index 0=IRON ... 6=MYTHIC).
+// For pull-up, ratio = (bodyweight + added weight) / bodyweight.
+const STRENGTH_STANDARDS = {
+  male: {
+    bench:    [0.40, 0.60, 0.85, 1.10, 1.40, 1.70, 2.00],
+    squat:    [0.60, 0.90, 1.20, 1.50, 1.85, 2.20, 2.60],
+    deadlift: [0.80, 1.10, 1.40, 1.80, 2.20, 2.60, 3.00],
+    ohp:      [0.30, 0.45, 0.60, 0.75, 0.90, 1.10, 1.30],
+    row:      [0.40, 0.60, 0.80, 1.00, 1.25, 1.50, 1.75],
+    pullup:   [1.00, 1.10, 1.25, 1.40, 1.60, 1.80, 2.00],
+  },
+  female: {
+    bench:    [0.25, 0.40, 0.55, 0.70, 0.90, 1.10, 1.30],
+    squat:    [0.40, 0.60, 0.80, 1.05, 1.30, 1.60, 1.90],
+    deadlift: [0.50, 0.75, 1.00, 1.25, 1.60, 1.95, 2.30],
+    ohp:      [0.20, 0.30, 0.40, 0.50, 0.65, 0.80, 0.95],
+    row:      [0.25, 0.40, 0.55, 0.70, 0.90, 1.10, 1.30],
+    pullup:   [1.00, 1.05, 1.15, 1.30, 1.45, 1.60, 1.75],
+  },
+};
+
+// Rewards unlocked at each tier (titles + perks + unlocks).
+const RANK_REWARDS = [
+  { tier: 'IRON',     title: 'Initiate',   perk: 'Lift logging unlocked',        unlock: 'The basics. Everyone starts here.' },
+  { tier: 'BRONZE',   title: 'Apprentice', perk: 'Bronze badge',                 unlock: 'Accessory rotation insights' },
+  { tier: 'STEEL',    title: 'Forged',     perk: 'Steel badge',                  unlock: 'Tempo & time-under-tension tips' },
+  { tier: 'SILVER',   title: 'Striker',    perk: 'Silver badge',                 unlock: 'Advanced exercise variations' },
+  { tier: 'GOLD',     title: 'Champion',   perk: 'Gold badge + profile flair',   unlock: 'Periodization deep-dives' },
+  { tier: 'TITANIUM', title: 'Titan',      perk: 'Titanium badge',               unlock: 'Elite programming protocols' },
+  { tier: 'MYTHIC',   title: 'Mythic',     perk: 'Mythic status — the summit',   unlock: 'You are the standard others chase.' },
+];
+
+// Match a workout exercise name to a rankable lift id (or null)
+function matchRankLift(exerciseName) {
+  const n = (exerciseName || '').toLowerCase();
+  if (n.includes('bench')) return 'bench';
+  if (n.includes('deadlift')) return 'deadlift';
+  if (n.includes('squat') && !n.includes('split') && !n.includes('pistol') && !n.includes('goblet')) return 'squat';
+  if ((n.includes('overhead') || n.includes('military') || n.includes('shoulder press')) && n.includes('press')) return 'ohp';
+  if (n.includes('row') && (n.includes('barbell') || n.includes('bent'))) return 'row';
+  if (n.includes('pull-up') || n.includes('pullup') || n.includes('pull up')) return 'pullup';
+  return null;
+}
+
+// Estimate 1-rep max from weight and reps (Epley formula, capped at 12 reps).
+function estimate1RM(weight, reps) {
+  const w = +weight || 0;
+  const r = Math.max(1, Math.min(12, +reps || 1));
+  if (r === 1) return w;
+  return Math.round(w * (1 + r / 30));
+}
+
+// Given a lift, the user's est 1RM, bodyweight, and sex → tier index (0-6) + progress to next.
+function tierForLift(liftId, e1rm, bodyweight, sex) {
+  const standards = (STRENGTH_STANDARDS[sex] || STRENGTH_STANDARDS.male)[liftId];
+  if (!standards || !bodyweight) return { tier: 0, ratio: 0, toNext: 0 };
+  // For pull-ups, the "weight" lifted is bodyweight + added; ratio includes bodyweight.
+  const ratio = liftId === 'pullup'
+    ? (bodyweight + e1rm) / bodyweight
+    : e1rm / bodyweight;
+  let tier = 0;
+  for (let i = 0; i < standards.length; i++) {
+    if (ratio >= standards[i]) tier = i;
+  }
+  // progress toward next tier (0-1)
+  let toNext = 1;
+  if (tier < standards.length - 1) {
+    const cur = standards[tier];
+    const nxt = standards[tier + 1];
+    toNext = Math.max(0, Math.min(1, (ratio - cur) / (nxt - cur)));
+  }
+  return { tier, ratio: +ratio.toFixed(2), toNext };
+}
+
+// Overall rank = the rounded average tier across all lifts the user has logged.
+function overallRank(bestLifts, bodyweight, sex) {
+  const entries = Object.entries(bestLifts || {});
+  if (entries.length === 0) return { tier: 0, count: 0 };
+  let sum = 0;
+  for (const [liftId, e1rm] of entries) {
+    sum += tierForLift(liftId, e1rm, bodyweight, sex).tier;
+  }
+  return { tier: Math.round(sum / entries.length), count: entries.length };
+}
 
 const GOAL_SCHEMES = {
   muscle:     { sets: 4, reps: '8–12',  rest: 90,  tempo: 'Controlled' },
@@ -869,6 +979,7 @@ export default function ForgeApp() {
   const [weights, setWeights] = useState([]); // [{date, kg}]
   const [wellness, setWellness] = useState({}); // { 'YYYY-MM-DD': {sleep, energy, mood} }
   const [physiqueLog, setPhysiqueLog] = useState([]); // [{at, date, thumb, rating, strengths[], focus[], encouragement}]
+  const [liftLog, setLiftLog] = useState([]); // [{id, exercise, weight, reps, e1rm, at, source}]
   const [completedDays, setCompletedDays] = useState({});
   const [tab, setTab] = useState('home');
   const [editing, setEditing] = useState(false);
@@ -886,7 +997,7 @@ export default function ForgeApp() {
   // Load state
   useEffect(() => {
     (async () => {
-      const [p, f, w, wt, wl, cd, pq] = await Promise.all([
+      const [p, f, w, wt, wl, cd, pq, ll] = await Promise.all([
         loadKey('forge2:profile', null),
         loadKey('forge2:foodLog', null),
         loadKey('forge2:water', null),
@@ -894,6 +1005,7 @@ export default function ForgeApp() {
         loadKey('forge2:wellness', {}),
         loadKey('forge2:completedDays', {}),
         loadKey('forge2:physique', []),
+        loadKey('forge2:lifts', []),
       ]);
       if (p) {
         // Migration: older profiles don't have trainingDays
@@ -914,6 +1026,7 @@ export default function ForgeApp() {
       if (wl) setWellness(wl);
       if (cd) setCompletedDays(cd);
       if (pq) setPhysiqueLog(pq);
+      if (ll) setLiftLog(ll);
       setLoaded(true);
     })();
   }, []);
@@ -926,6 +1039,7 @@ export default function ForgeApp() {
   useEffect(() => { if (loaded) storage.set('forge2:wellness', JSON.stringify(wellness)).catch(()=>{}); }, [wellness, loaded]);
   useEffect(() => { if (loaded) storage.set('forge2:completedDays', JSON.stringify(completedDays)).catch(()=>{}); }, [completedDays, loaded]);
   useEffect(() => { if (loaded) storage.set('forge2:physique', JSON.stringify(physiqueLog)).catch(()=>{}); }, [physiqueLog, loaded]);
+  useEffect(() => { if (loaded) storage.set('forge2:lifts', JSON.stringify(liftLog)).catch(()=>{}); }, [liftLog, loaded]);
 
   const reset = async () => {
     setProfile(null);
@@ -934,10 +1048,11 @@ export default function ForgeApp() {
     setWeights([]);
     setWellness({});
     setPhysiqueLog([]);
+    setLiftLog([]);
     setCompletedDays({});
     setTab('home');
     try {
-      for (const k of ['forge2:profile','forge2:foodLog','forge2:water','forge2:weights','forge2:wellness','forge2:completedDays','forge2:physique']) {
+      for (const k of ['forge2:profile','forge2:foodLog','forge2:water','forge2:weights','forge2:wellness','forge2:completedDays','forge2:physique','forge2:lifts']) {
         await storage.delete(k);
       }
     } catch(_){}
@@ -967,21 +1082,19 @@ export default function ForgeApp() {
         {tab === 'home' && (
           <Dashboard profile={profile} nutrition={nutrition} consumed={consumed}
             completedDays={completedDays} streak={streak} weights={weights}
-            water={water} wellness={wellness} setTab={setTab} />
+            water={water} wellness={wellness} liftLog={liftLog} setTab={setTab} />
         )}
         {tab === 'workouts' && (
-          <Workouts profile={profile} completedDays={completedDays} setCompletedDays={setCompletedDays} />
+          <Workouts profile={profile} completedDays={completedDays} setCompletedDays={setCompletedDays}
+            liftLog={liftLog} setLiftLog={setLiftLog} />
+        )}
+        {tab === 'rank' && (
+          <RankTab profile={profile} liftLog={liftLog} setLiftLog={setLiftLog}
+            physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog} />
         )}
         {tab === 'nutrition' && (
-          <Nutrition profile={profile} nutrition={nutrition} />
-        )}
-        {tab === 'tracker' && (
-          <Tracker profile={profile} nutrition={nutrition} consumed={consumed}
-            foodLog={foodLog} setFoodLog={setFoodLog}
-            water={water} setWater={setWater}
-            weights={weights} setWeights={setWeights}
-            wellness={wellness} setWellness={setWellness}
-            physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog} />
+          <Nutrition profile={profile} nutrition={nutrition} consumed={consumed}
+            foodLog={foodLog} setFoodLog={setFoodLog} />
         )}
         {tab === 'coach' && (
           <Coach profile={profile} nutrition={nutrition} consumed={consumed}
@@ -1547,8 +1660,8 @@ function BottomNav({ tab, setTab }) {
   const items = [
     { id: 'home',      label: 'Home',     Icon: Home },
     { id: 'workouts',  label: 'Train',    Icon: Dumbbell },
+    { id: 'rank',      label: 'Rank',     Icon: Trophy },
     { id: 'nutrition', label: 'Fuel',     Icon: Apple },
-    { id: 'tracker',   label: 'Track',    Icon: BarChart3 },
     { id: 'coach',     label: 'Coach',    Icon: Sparkles },
   ];
   return (
@@ -2246,7 +2359,16 @@ function PreviewStat({ label, value, accent }) {
 // DASHBOARD
 // ============================================================
 
-function Dashboard({ profile, nutrition, consumed, completedDays, streak, weights, water, wellness, setTab }) {
+function Dashboard({ profile, nutrition, consumed, completedDays, streak, weights, water, wellness, liftLog, setTab }) {
+  const dashBestLifts = useMemo(() => {
+    const best = {};
+    for (const l of (liftLog || [])) {
+      if (!best[l.exercise] || l.e1rm > best[l.exercise]) best[l.exercise] = l.e1rm;
+    }
+    return best;
+  }, [liftLog]);
+  const dashRank = overallRank(dashBestLifts, profile.weight, profile.sex);
+  const dashTier = RANK_TIERS[dashRank.tier];
   const goalsList = goalsFor(profile);
   const goal = goalsList.find(g => g.id === profile.goal) || goalsList[0];
   const plan = WORKOUT_PLANS[profile.type];
@@ -2294,7 +2416,7 @@ function Dashboard({ profile, nutrition, consumed, completedDays, streak, weight
         <StatTile label="Streak" value={`${streak}`} unit="days" accent={streak > 0} />
         <StatTile label="Calories" value={`${Math.round(consumed.kcal)}`} unit={`/ ${nutrition.target}`} />
         <StatTile label="Protein" value={`${Math.round(consumed.p)}g`} unit={`/ ${nutrition.protein}g`} />
-        <StatTile label="Water" value={`${water.cups || 0}`} unit={`/ ${nutrition.waterCups} cups`} />
+        <StatTile label="Rank" value={dashTier.name} unit={dashRank.count > 0 ? `${dashRank.count} lifts` : 'unranked'} accent={dashRank.count > 0} />
       </section>
 
       {/* Today's session or rest-day overview */}
@@ -2341,7 +2463,7 @@ function Dashboard({ profile, nutrition, consumed, completedDays, streak, weight
           </div>
           <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 4, letterSpacing: 1 }}>KCAL TODAY</div>
           <MacroBar consumed={consumed} target={nutrition} />
-          <Btn onClick={() => setTab('tracker')} style={{ marginTop: 16 }}>LOG FOOD <Plus size={14}/></Btn>
+          <Btn onClick={() => setTab('nutrition')} style={{ marginTop: 16 }}>LOG FOOD <Plus size={14}/></Btn>
         </Card>
 
         <Card>
@@ -2361,21 +2483,21 @@ function Dashboard({ profile, nutrition, consumed, completedDays, streak, weight
       {/* Mini stats row */}
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
         <MiniStatCard
-          icon={<Scale size={14}/>} label="Weight"
-          value={latestW ? `${latestW.kg} kg` : '—'}
-          sub={weightChange !== null ? `${weightChange > 0 ? '+' : ''}${weightChange} kg / 7d` : 'Log to track trend'} />
+          icon={<Trophy size={14}/>} label="Strength rank"
+          value={dashTier.name}
+          sub={dashRank.count > 0 ? `${RANK_REWARDS[dashRank.tier].title}` : 'Log a lift to rank up'} />
         <MiniStatCard
-          icon={<Droplet size={14}/>} label="Hydration"
-          value={`${water.cups || 0}/${nutrition.waterCups}`}
-          sub={`${Math.round(((water.cups||0)/nutrition.waterCups)*100)}% of daily`} />
+          icon={<Dumbbell size={14}/>} label="Lifts logged"
+          value={`${(liftLog || []).length}`}
+          sub={(liftLog || []).length > 0 ? 'Keep stacking PRs' : 'Open Rank to start'} />
         <MiniStatCard
-          icon={<Moon size={14}/>} label="Last sleep"
-          value={wellness[todayStr()]?.sleep ? `${wellness[todayStr()].sleep}h` : '—'}
-          sub={wellness[todayStr()]?.sleep ? 'Logged today' : 'Tap Track to log'} />
+          icon={<Flame size={14}/>} label="Streak"
+          value={`${streak}`}
+          sub={streak > 0 ? 'days in a row' : 'Train today to start'} />
         <MiniStatCard
-          icon={<Smile size={14}/>} label="Energy"
-          value={wellness[todayStr()]?.energy ? `${wellness[todayStr()].energy}/10` : '—'}
-          sub={wellness[todayStr()]?.energy ? 'Logged today' : 'Tap Track to log'} />
+          icon={<Apple size={14}/>} label="Calories today"
+          value={`${Math.round(consumed.kcal)}`}
+          sub={`of ${nutrition.target} target`} />
       </section>
 
       {/* Achievements */}
@@ -2461,7 +2583,7 @@ function buildAchievements({ completedDays, weights, water, streak }) {
 // WORKOUTS
 // ============================================================
 
-function Workouts({ profile, completedDays, setCompletedDays }) {
+function Workouts({ profile, completedDays, setCompletedDays, liftLog, setLiftLog }) {
   const plan = WORKOUT_PLANS[profile.type];
   const baseScheme = GOAL_SCHEMES[profile.goal] || GOAL_SCHEMES.muscle;
   const block = getBlockInfo(profile, plan);
@@ -2471,9 +2593,24 @@ function Workouts({ profile, completedDays, setCompletedDays }) {
   const [doneEx, setDoneEx] = useState({});
   const [swapEx, setSwapEx] = useState(null);
   const [timer, setTimer] = useState({ active: false, remaining: 0, total: scheme.rest });
+  const [logInputs, setLogInputs] = useState({}); // { exerciseIndex: { weight, reps } }
+  const [loggedSets, setLoggedSets] = useState({}); // { exerciseIndex: true } once logged this session
+
+  const logTopSet = (i, liftId, exName) => {
+    const inp = logInputs[i] || {};
+    const w = +inp.weight, r = +inp.reps;
+    if (!w || !r) return;
+    const e1rm = estimate1RM(w, r);
+    setLiftLog(prev => [...(prev || []), {
+      id: Math.random().toString(36).slice(2),
+      exercise: liftId, weight: w, reps: r, e1rm,
+      at: Date.now(), source: 'workout',
+    }]);
+    setLoggedSets(s => ({ ...s, [i]: true }));
+  };
 
   // Reset done when changing day or block
-  useEffect(() => { setDoneEx({}); }, [activeDay, block.blockIndex]);
+  useEffect(() => { setDoneEx({}); setLogInputs({}); setLoggedSets({}); }, [activeDay, block.blockIndex]);
 
   useEffect(() => {
     if (!timer.active || timer.remaining <= 0) return;
@@ -2570,39 +2707,73 @@ function Workouts({ profile, completedDays, setCompletedDays }) {
           {exercises.map((ex, i) => {
             const checked = !!doneEx[i];
             const isAccessory = i >= coreCount;
+            const rankLift = !isAccessory ? matchRankLift(ex) : null;
+            const inp = logInputs[i] || {};
+            const wasLogged = loggedSets[i];
             return (
               <div key={`${block.blockIndex}-${i}-${ex}`} style={{
                 background: checked ? C.panel2 : C.bg,
-                padding: '14px 14px',
-                display: 'grid', gridTemplateColumns: '28px 1fr auto auto auto', gap: 12,
-                alignItems: 'center', opacity: checked ? 0.55 : 1,
               }}>
-                <button onClick={() => toggleEx(i)} style={{ background: 'transparent', border: 0, cursor: 'pointer', color: C.text, padding: 0, display: 'flex' }}>
-                  {checked
-                    ? <CheckCircle2 size={20} style={{ color: C.accent }} />
-                    : <Circle size={20} style={{ color: C.dim }} />}
-                </button>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 500, textDecoration: checked ? 'line-through' : 'none' }}>
-                    {ex}
-                  </div>
-                  <div style={{ fontFamily: fontMono, fontSize: 9, color: isAccessory ? C.dim : C.accent, letterSpacing: 1.5, marginTop: 2 }}>
-                    {isAccessory ? 'ACCESSORY' : 'CORE LIFT'}
-                  </div>
-                </div>
-                <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 1, whiteSpace: 'nowrap' }}>
-                  {scheme.sets} × {scheme.reps}
-                </div>
-                <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, whiteSpace: 'nowrap' }}>
-                  {scheme.rest}s
-                </div>
-                <button onClick={() => setSwapEx(ex)} title="See alternatives" style={{
-                  background: 'transparent', border: `1px solid ${C.line}`, color: C.dim,
-                  padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                  fontFamily: fontMono, fontSize: 10, letterSpacing: 1,
+                <div style={{
+                  padding: '14px 14px',
+                  display: 'grid', gridTemplateColumns: '28px 1fr auto auto auto', gap: 12,
+                  alignItems: 'center', opacity: checked ? 0.55 : 1,
                 }}>
-                  <RefreshCw size={12}/> SWAP
-                </button>
+                  <button onClick={() => toggleEx(i)} style={{ background: 'transparent', border: 0, cursor: 'pointer', color: C.text, padding: 0, display: 'flex' }}>
+                    {checked
+                      ? <CheckCircle2 size={20} style={{ color: C.accent }} />
+                      : <Circle size={20} style={{ color: C.dim }} />}
+                  </button>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 500, textDecoration: checked ? 'line-through' : 'none' }}>
+                      {ex}
+                    </div>
+                    <div style={{ fontFamily: fontMono, fontSize: 9, color: isAccessory ? C.dim : C.accent, letterSpacing: 1.5, marginTop: 2 }}>
+                      {isAccessory ? 'ACCESSORY' : 'CORE LIFT'}{rankLift ? ' · RANKED' : ''}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 1, whiteSpace: 'nowrap' }}>
+                    {scheme.sets} × {scheme.reps}
+                  </div>
+                  <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, whiteSpace: 'nowrap' }}>
+                    {scheme.rest}s
+                  </div>
+                  <button onClick={() => setSwapEx(ex)} title="See alternatives" style={{
+                    background: 'transparent', border: `1px solid ${C.line}`, color: C.dim,
+                    padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                    fontFamily: fontMono, fontSize: 10, letterSpacing: 1,
+                  }}>
+                    <RefreshCw size={12}/> SWAP
+                  </button>
+                </div>
+
+                {/* Inline rank logger for ranked core lifts */}
+                {rankLift && (
+                  <div style={{ padding: '0 14px 14px 54px' }}>
+                    {wasLogged ? (
+                      <div style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 1 }}>
+                        ✓ TOP SET LOGGED TO YOUR RANK
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: fontMono, fontSize: 9, color: C.dim, letterSpacing: 1.5 }}>LOG TOP SET →</span>
+                        <input type="number" inputMode="decimal" placeholder={rankLift === 'pullup' ? '+kg' : 'kg'}
+                          value={inp.weight || ''} onChange={e => setLogInputs(s => ({ ...s, [i]: { ...inp, weight: e.target.value } }))}
+                          style={{ width: 60, background: 'transparent', border: `1px solid ${C.line}`, color: C.text, padding: '6px 8px', fontFamily: fontMono, fontSize: 12, outline: 'none' }} />
+                        <span style={{ color: C.dim, fontFamily: fontMono, fontSize: 12 }}>×</span>
+                        <input type="number" inputMode="numeric" placeholder="reps"
+                          value={inp.reps || ''} onChange={e => setLogInputs(s => ({ ...s, [i]: { ...inp, reps: e.target.value } }))}
+                          style={{ width: 56, background: 'transparent', border: `1px solid ${C.line}`, color: C.text, padding: '6px 8px', fontFamily: fontMono, fontSize: 12, outline: 'none' }} />
+                        <button onClick={() => logTopSet(i, rankLift, ex)} disabled={!inp.weight || !inp.reps} style={{
+                          background: (!inp.weight || !inp.reps) ? C.line : C.accent,
+                          color: (!inp.weight || !inp.reps) ? C.dim : '#000', border: 0,
+                          padding: '6px 12px', cursor: (!inp.weight || !inp.reps) ? 'not-allowed' : 'pointer',
+                          fontFamily: fontMono, fontSize: 10, letterSpacing: 1.5, fontWeight: 700,
+                        }}>LOG</button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -2698,7 +2869,7 @@ function Workouts({ profile, completedDays, setCompletedDays }) {
 // NUTRITION / FUEL
 // ============================================================
 
-function Nutrition({ profile, nutrition }) {
+function Nutrition({ profile, nutrition, consumed, foodLog, setFoodLog }) {
   const goal = goalsFor(profile).find(g => g.id === profile.goal);
   const mealSplits = useMemo(() => buildMealPlan(nutrition, profile.goal, profile.diet), [nutrition, profile.goal, profile.diet]);
 
@@ -2765,8 +2936,17 @@ function Nutrition({ profile, nutrition }) {
           ))}
         </div>
         <p style={{ color: C.dim, fontSize: 12, marginTop: 16, fontStyle: 'italic' }}>
-          Templates only — log what you actually eat in Track. That's where the real data lives.
+          Templates only — log what you actually eat below. That's where the real data lives.
         </p>
+      </section>
+
+      {/* Live calorie + macro logging (moved from old Track tab) */}
+      <section style={{ borderTop: `1px solid ${C.line}`, paddingTop: 20 }}>
+        <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 3, marginBottom: 4 }}>
+          / TODAY'S LOG · {todayStr()}
+        </div>
+        <FoodTracker nutrition={nutrition} consumed={consumed}
+          foodLog={foodLog} setFoodLog={setFoodLog} profile={profile} />
       </section>
     </div>
   );
@@ -3879,6 +4059,324 @@ function PhysiqueResultCard({ entry, expanded, onDelete, embedded }) {
         }}>
           <Trash2 size={11}/> DELETE
         </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// RANK TAB — strength ranking + rewards + physique
+// ============================================================
+
+function RankEmblem({ tier, size = 120 }) {
+  const t = RANK_TIERS[tier] || RANK_TIERS[0];
+  return (
+    <div style={{
+      width: size, height: size, position: 'relative',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+        background: `linear-gradient(135deg, ${t.color}, ${t.color}88)`,
+        boxShadow: `0 0 30px ${t.glow}`,
+      }} />
+      <div style={{
+        position: 'absolute', inset: 4,
+        clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+        background: C.bg,
+      }} />
+      <div style={{
+        position: 'relative', fontFamily: fontDisplay, fontSize: size * 0.34,
+        color: t.color, letterSpacing: 1, lineHeight: 1, textAlign: 'center',
+      }}>{t.id + 1}</div>
+    </div>
+  );
+}
+
+function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) {
+  const bodyweight = profile.weight;
+  const sex = profile.sex;
+  const [form, setForm] = useState({ exercise: 'bench', weight: '', reps: '' });
+  const [celebrate, setCelebrate] = useState(null);
+  const [section, setSection] = useState('rank'); // 'rank' | 'physique'
+
+  const bestLifts = useMemo(() => {
+    const best = {};
+    for (const l of (liftLog || [])) {
+      if (!best[l.exercise] || l.e1rm > best[l.exercise]) best[l.exercise] = l.e1rm;
+    }
+    return best;
+  }, [liftLog]);
+
+  const overall = overallRank(bestLifts, bodyweight, sex);
+  const overallTier = RANK_TIERS[overall.tier];
+  const reward = RANK_REWARDS[overall.tier];
+
+  const previewE1RM = form.weight && form.reps ? estimate1RM(form.weight, form.reps) : null;
+
+  const logLift = () => {
+    const w = +form.weight, r = +form.reps;
+    if (!w || !r) return;
+    const e1rm = estimate1RM(w, r);
+    const beforeTier = overallRank(bestLifts, bodyweight, sex).tier;
+    const newBest = { ...bestLifts };
+    if (!newBest[form.exercise] || e1rm > newBest[form.exercise]) newBest[form.exercise] = e1rm;
+    const afterTier = overallRank(newBest, bodyweight, sex).tier;
+
+    setLiftLog(prev => [...(prev || []), {
+      id: Math.random().toString(36).slice(2),
+      exercise: form.exercise, weight: w, reps: r, e1rm,
+      at: Date.now(), source: 'manual',
+    }]);
+    setForm({ exercise: form.exercise, weight: '', reps: '' });
+    if (afterTier > beforeTier) setCelebrate(RANK_TIERS[afterTier]);
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 20 }}>
+      <section>
+        <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 3 }}>/ YOUR RANK</div>
+        <h1 style={{ fontFamily: fontDisplay, fontSize: 'clamp(40px, 7vw, 72px)', lineHeight: 0.95, margin: '12px 0 0', letterSpacing: 1 }}>
+          THE <span style={{ color: C.accent }}>CLIMB</span>.
+        </h1>
+      </section>
+
+      {/* Section toggle */}
+      <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, border: `1px solid ${C.line}`, background: C.line }}>
+        {[{ id: 'rank', label: 'STRENGTH', Icon: Trophy }, { id: 'physique', label: 'PHYSIQUE', Icon: Camera }].map(({ id, label, Icon }) => {
+          const active = section === id;
+          return (
+            <button key={id} onClick={() => setSection(id)} style={{
+              background: active ? C.panel2 : C.bg, border: 0, padding: '14px 6px', cursor: 'pointer',
+              color: active ? C.accent : C.dim,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}>
+              <Icon size={16} />
+              <div style={{ fontFamily: fontMono, fontSize: 11, letterSpacing: 2 }}>{label}</div>
+            </button>
+          );
+        })}
+      </section>
+
+      {section === 'rank' && (
+        <>
+          {/* Hero rank */}
+          <section style={{
+            border: `1px solid ${overallTier.color}`, background: C.panel, padding: 24,
+            display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+          }}>
+            <RankEmblem tier={overall.tier} size={110} />
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2 }}>CURRENT RANK</div>
+              <div style={{ fontFamily: fontDisplay, fontSize: 44, color: overallTier.color, letterSpacing: 1, lineHeight: 1 }}>
+                {overallTier.name}
+              </div>
+              <div style={{ fontFamily: fontMono, fontSize: 12, color: C.text, letterSpacing: 1, marginTop: 4 }}>
+                "{reward.title}"
+              </div>
+              <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 8 }}>
+                {overall.count === 0
+                  ? 'Log your first lift to get ranked.'
+                  : `Based on ${overall.count} lift${overall.count === 1 ? '' : 's'} · BW ${bodyweight}kg`}
+              </div>
+            </div>
+          </section>
+
+          {/* Log a lift */}
+          <section style={{ border: `1px solid ${C.line}`, padding: 20 }}>
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2, marginBottom: 14 }}>/ LOG A LIFT</div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 1.5, marginBottom: 6 }}>EXERCISE</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {RANK_LIFTS.map(l => (
+                    <button key={l.id} onClick={() => setForm(f => ({ ...f, exercise: l.id }))} style={{
+                      padding: '8px 12px', cursor: 'pointer',
+                      background: form.exercise === l.id ? C.accent : 'transparent',
+                      border: `1px solid ${form.exercise === l.id ? C.accent : C.line}`,
+                      color: form.exercise === l.id ? '#000' : C.text,
+                      fontFamily: fontMono, fontSize: 11, letterSpacing: 1,
+                    }}>{l.name.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 1.5, marginBottom: 6 }}>
+                    {form.exercise === 'pullup' ? 'ADDED WEIGHT (KG)' : 'WEIGHT (KG)'}
+                  </div>
+                  <input type="number" inputMode="decimal" value={form.weight}
+                    onChange={e => setForm(f => ({ ...f, weight: e.target.value }))}
+                    placeholder={form.exercise === 'pullup' ? '0 = bodyweight' : 'e.g. 60'} style={inputStyle} />
+                </div>
+                <div>
+                  <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 1.5, marginBottom: 6 }}>REPS</div>
+                  <input type="number" inputMode="numeric" value={form.reps}
+                    onChange={e => setForm(f => ({ ...f, reps: e.target.value }))}
+                    placeholder="e.g. 5" style={inputStyle} />
+                </div>
+              </div>
+              {previewE1RM != null && (
+                <div style={{ fontFamily: fontMono, fontSize: 12, color: C.accent, letterSpacing: 1 }}>
+                  / EST. 1-REP MAX: {previewE1RM} KG
+                </div>
+              )}
+              <button onClick={logLift} disabled={!form.weight || !form.reps} style={{
+                background: (!form.weight || !form.reps) ? C.line : C.accent,
+                color: (!form.weight || !form.reps) ? C.dim : '#000', border: 0,
+                padding: '14px', cursor: (!form.weight || !form.reps) ? 'not-allowed' : 'pointer',
+                fontFamily: fontMono, fontSize: 12, letterSpacing: 2, fontWeight: 700,
+              }}>LOG LIFT</button>
+            </div>
+          </section>
+
+          {/* Per-lift breakdown */}
+          <section>
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>/ LIFT BREAKDOWN</div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {RANK_LIFTS.map(l => {
+                const e1rm = bestLifts[l.id];
+                const info = e1rm ? tierForLift(l.id, e1rm, bodyweight, sex) : null;
+                const t = info ? RANK_TIERS[info.tier] : null;
+                return (
+                  <div key={l.id} style={{ border: `1px solid ${C.line}`, padding: 14, background: C.panel }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <div style={{ fontFamily: fontDisplay, fontSize: 18, letterSpacing: 0.5 }}>{l.name.toUpperCase()}</div>
+                      {t ? (
+                        <div style={{ fontFamily: fontMono, fontSize: 12, color: t.color, letterSpacing: 1 }}>{t.name}</div>
+                      ) : (
+                        <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 1 }}>NOT LOGGED</div>
+                      )}
+                    </div>
+                    {info && (
+                      <>
+                        <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 4 }}>
+                          {e1rm}kg 1RM · {info.ratio}× bodyweight
+                        </div>
+                        {info.tier < RANK_TIERS.length - 1 && (
+                          <div style={{ marginTop: 8 }}>
+                            <div style={{ height: 4, background: C.line, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${Math.round(info.toNext * 100)}%`, background: t.color }} />
+                            </div>
+                            <div style={{ fontFamily: fontMono, fontSize: 9, color: C.dim, marginTop: 4, letterSpacing: 1 }}>
+                              {Math.round(info.toNext * 100)}% TO {RANK_TIERS[info.tier + 1].name}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Rewards ladder */}
+          <section>
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>/ REWARDS LADDER</div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {RANK_REWARDS.map((r, i) => {
+                const t = RANK_TIERS[i];
+                const unlocked = i <= overall.tier && overall.count > 0;
+                const isCurrent = i === overall.tier && overall.count > 0;
+                return (
+                  <div key={r.tier} style={{
+                    border: `1px solid ${isCurrent ? t.color : C.line}`,
+                    background: unlocked ? C.panel : 'transparent',
+                    padding: 14, opacity: unlocked ? 1 : 0.5,
+                    display: 'flex', alignItems: 'center', gap: 14,
+                  }}>
+                    <div style={{
+                      width: 30, height: 30, flexShrink: 0,
+                      clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+                      background: unlocked ? t.color : C.line,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontFamily: fontDisplay, fontSize: 13, color: unlocked ? '#000' : C.dim,
+                    }}>{i + 1}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: fontDisplay, fontSize: 17, letterSpacing: 0.5, color: unlocked ? t.color : C.dim }}>
+                        {r.tier} {isCurrent && <span style={{ fontSize: 10, color: C.accent }}>· YOU ARE HERE</span>}
+                      </div>
+                      <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, marginTop: 2, letterSpacing: 1 }}>
+                        "{r.title}" · {r.perk}
+                      </div>
+                      <div style={{ fontFamily: fontBody, fontSize: 12, color: unlocked ? C.text : C.dim, marginTop: 3 }}>
+                        {unlocked ? r.unlock : '🔒 ' + r.unlock}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Recent lifts */}
+          {(liftLog || []).length > 0 && (
+            <section>
+              <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>/ RECENT LIFTS</div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {[...liftLog].sort((a, b) => b.at - a.at).slice(0, 10).map(l => {
+                  const lift = RANK_LIFTS.find(x => x.id === l.exercise);
+                  return (
+                    <div key={l.id} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      border: `1px solid ${C.line}`, padding: '10px 14px',
+                    }}>
+                      <div>
+                        <div style={{ fontFamily: fontMono, fontSize: 13, letterSpacing: 0.5 }}>{lift ? lift.name : l.exercise}</div>
+                        <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, marginTop: 2 }}>
+                          {l.weight}kg × {l.reps} · {l.source === 'workout' ? 'from workout' : 'manual'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ fontFamily: fontMono, fontSize: 12, color: C.accent }}>{l.e1rm}kg 1RM</div>
+                        <button onClick={() => setLiftLog(prev => prev.filter(x => x.id !== l.id))} style={{
+                          background: 'transparent', border: 0, color: C.dim, cursor: 'pointer', padding: 4,
+                        }}><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {section === 'physique' && (
+        <PhysiqueTracker profile={profile} physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog} />
+      )}
+
+      {/* Rank-up celebration */}
+      {celebrate && (
+        <div onClick={() => setCelebrate(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(8,8,10,0.94)', zIndex: 400,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            textAlign: 'center', maxWidth: 360,
+          }}>
+            <div style={{ fontFamily: fontMono, fontSize: 12, color: C.accent, letterSpacing: 4, marginBottom: 20 }}>RANK UP</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+              <RankEmblem tier={celebrate.id} size={160} />
+            </div>
+            <div style={{ fontFamily: fontDisplay, fontSize: 56, color: celebrate.color, letterSpacing: 1, lineHeight: 1 }}>
+              {celebrate.name}
+            </div>
+            <div style={{ fontFamily: fontMono, fontSize: 13, color: C.text, letterSpacing: 1, marginTop: 10 }}>
+              "{RANK_REWARDS[celebrate.id].title}" unlocked
+            </div>
+            <div style={{ fontFamily: fontBody, fontSize: 14, color: C.dim, marginTop: 8 }}>
+              {RANK_REWARDS[celebrate.id].unlock}
+            </div>
+            <button onClick={() => setCelebrate(null)} style={{
+              marginTop: 24, background: C.accent, color: '#000', border: 0,
+              padding: '14px 28px', cursor: 'pointer',
+              fontFamily: fontMono, fontSize: 12, letterSpacing: 2, fontWeight: 700,
+            }}>KEEP CLIMBING</button>
+          </div>
+        </div>
       )}
     </div>
   );
