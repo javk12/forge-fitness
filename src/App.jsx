@@ -1,4 +1,4 @@
-// FORGE v2.6 — Rank system + tab restructure. If you see this comment, this is the correct file.
+// FORGE v2.7 — Forge Points + leaderboard + 21 levels. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -267,6 +267,101 @@ function overallRank(bestLifts, bodyweight, sex) {
   }
   return { tier: Math.round(sum / entries.length), count: entries.length };
 }
+
+// ============================================================
+// FORGE POINTS + 21-LEVEL LADDER + LEADERBOARD
+// ============================================================
+// Each tier has 3 divisions (III → II → I). 7 tiers × 3 = 21 levels.
+// Points come from strength (relative to bodyweight) + activity.
+
+const RANK_LEVELS = (() => {
+  const thresholds = [0,200,450,750,1100,1500,1950,2450,3000,3600,4250,4950,5700,6500,7350,8250,9200,10200,11250,12350,13500];
+  const divisions = ['III', 'II', 'I'];
+  const rewards = [
+    'Welcome to the forge. Lift logging unlocked.',
+    'Consistency badge — show up, log, repeat.',
+    'Iron grip. Form-check tips unlocked.',
+    'Bronze badge earned. Accessory rotation insights.',
+    'Tempo training guide unlocked.',
+    'Bronze elite. Profile flair: bronze ring.',
+    'Steel badge. Progressive-overload deep-dive.',
+    'Mobility protocols unlocked.',
+    'Steel elite. Profile flair: steel ring.',
+    'Silver badge. Advanced exercise variations.',
+    'Periodization planner unlocked.',
+    'Silver elite. Profile flair: silver ring.',
+    'Gold badge. Elite programming protocols.',
+    'Recovery & deload science unlocked.',
+    'Gold elite. Profile flair: gold ring.',
+    'Titanium badge. You train like a pro.',
+    'Competition-prep guide unlocked.',
+    'Titanium elite. Profile flair: titanium ring.',
+    'Mythic badge. The summit is in sight.',
+    'Mythic II. Legendary status approaching.',
+    'MYTHIC I. You are the standard others chase.',
+  ];
+  return thresholds.map((pts, i) => ({
+    idx: i,
+    tier: Math.floor(i / 3),
+    division: divisions[i % 3],
+    points: pts,
+    reward: rewards[i],
+  }));
+})();
+
+function computeForgePoints({ bestLifts, bodyweight, liftLog, completedDays, physiqueLog }) {
+  let pts = 0;
+  for (const [liftId, e1rm] of Object.entries(bestLifts || {})) {
+    if (!bodyweight) continue;
+    const ratio = liftId === 'pullup' ? (bodyweight + e1rm) / bodyweight : e1rm / bodyweight;
+    pts += Math.round(ratio * 600); // 1× bodyweight on a lift ≈ 600 pts
+  }
+  pts += (liftLog?.length || 0) * 15;               // reward for logging
+  pts += Object.keys(completedDays || {}).length * 25; // workouts completed
+  pts += (physiqueLog?.length || 0) * 40;           // physique check-ins
+  return Math.round(pts);
+}
+
+function pointsToLevel(points) {
+  let idx = 0;
+  for (let i = 0; i < RANK_LEVELS.length; i++) {
+    if (points >= RANK_LEVELS[i].points) idx = i;
+  }
+  const level = RANK_LEVELS[idx];
+  const next = RANK_LEVELS[idx + 1] || null;
+  const progress = next ? Math.max(0, Math.min(1, (points - level.points) / (next.points - level.points))) : 1;
+  return {
+    ...level,
+    tierName: RANK_TIERS[level.tier].name,
+    color: RANK_TIERS[level.tier].color,
+    label: `${RANK_TIERS[level.tier].name} ${level.division}`,
+    next, progress, points,
+  };
+}
+
+// --- LEADERBOARD (placeholder competitors until real auth + backend) ---
+// TODO: replace getLeaderboard() with a real API call once login is built.
+const SEED_COMPETITORS = [
+  { name: 'IronWillpower', pts: 13180 }, { name: 'SquatQueen_Mia', pts: 11950 },
+  { name: 'DeadliftDom', pts: 10870 },   { name: 'BenchBeast_Ali', pts: 9940 },
+  { name: 'PR_Hunter', pts: 9120 },      { name: 'StoneMoved', pts: 8330 },
+  { name: 'LiftOrLeave', pts: 7610 },    { name: 'GymRatKev', pts: 6890 },
+  { name: 'ChalkAndChains', pts: 6240 }, { name: 'NoSkipLeggz', pts: 5580 },
+  { name: 'ApexAri', pts: 4970 },        { name: 'GripCity', pts: 4410 },
+  { name: 'TheGrindNeverStops', pts: 3880 }, { name: 'RepRangeRiley', pts: 3360 },
+  { name: 'PlatePusher', pts: 2870 },    { name: 'EarlyBirdEats', pts: 2400 },
+  { name: 'FormFirstFinn', pts: 1980 },  { name: 'RookieRising', pts: 1560 },
+  { name: 'JustStartedJ', pts: 1140 },   { name: 'Day1Dani', pts: 720 },
+  { name: 'FreshMeat', pts: 360 },       { name: 'NewbieNate', pts: 120 },
+];
+
+function getLeaderboard(userName, userPoints) {
+  const me = { name: userName && userName.trim() ? userName : 'You', pts: userPoints, isUser: true };
+  const all = [...SEED_COMPETITORS.map(c => ({ ...c, isUser: false })), me];
+  all.sort((a, b) => b.pts - a.pts);
+  return all.map((e, i) => ({ ...e, position: i + 1 }));
+}
+
 
 const GOAL_SCHEMES = {
   muscle:     { sets: 4, reps: '8–12',  rest: 90,  tempo: 'Controlled' },
@@ -1090,7 +1185,8 @@ export default function ForgeApp() {
         )}
         {tab === 'rank' && (
           <RankTab profile={profile} liftLog={liftLog} setLiftLog={setLiftLog}
-            physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog} />
+            physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog}
+            completedDays={completedDays} />
         )}
         {tab === 'nutrition' && (
           <Nutrition profile={profile} nutrition={nutrition} consumed={consumed}
@@ -2367,8 +2463,11 @@ function Dashboard({ profile, nutrition, consumed, completedDays, streak, weight
     }
     return best;
   }, [liftLog]);
-  const dashRank = overallRank(dashBestLifts, profile.weight, profile.sex);
-  const dashTier = RANK_TIERS[dashRank.tier];
+  const dashPoints = computeForgePoints({
+    bestLifts: dashBestLifts, bodyweight: profile.weight,
+    liftLog, completedDays, physiqueLog: [],
+  });
+  const dashLevel = pointsToLevel(dashPoints);
   const goalsList = goalsFor(profile);
   const goal = goalsList.find(g => g.id === profile.goal) || goalsList[0];
   const plan = WORKOUT_PLANS[profile.type];
@@ -2416,7 +2515,7 @@ function Dashboard({ profile, nutrition, consumed, completedDays, streak, weight
         <StatTile label="Streak" value={`${streak}`} unit="days" accent={streak > 0} />
         <StatTile label="Calories" value={`${Math.round(consumed.kcal)}`} unit={`/ ${nutrition.target}`} />
         <StatTile label="Protein" value={`${Math.round(consumed.p)}g`} unit={`/ ${nutrition.protein}g`} />
-        <StatTile label="Rank" value={dashTier.name} unit={dashRank.count > 0 ? `${dashRank.count} lifts` : 'unranked'} accent={dashRank.count > 0} />
+        <StatTile label="Rank" value={dashLevel.label} unit={`${dashPoints.toLocaleString()} FP`} accent={dashPoints > 0} />
       </section>
 
       {/* Today's session or rest-day overview */}
@@ -2484,8 +2583,8 @@ function Dashboard({ profile, nutrition, consumed, completedDays, streak, weight
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
         <MiniStatCard
           icon={<Trophy size={14}/>} label="Strength rank"
-          value={dashTier.name}
-          sub={dashRank.count > 0 ? `${RANK_REWARDS[dashRank.tier].title}` : 'Log a lift to rank up'} />
+          value={dashLevel.label}
+          sub={dashPoints > 0 ? `${dashPoints.toLocaleString()} Forge Points` : 'Log a lift to start ranking'} />
         <MiniStatCard
           icon={<Dumbbell size={14}/>} label="Lifts logged"
           value={`${(liftLog || []).length}`}
@@ -4094,12 +4193,13 @@ function RankEmblem({ tier, size = 120 }) {
   );
 }
 
-function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) {
+function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog, completedDays }) {
   const bodyweight = profile.weight;
   const sex = profile.sex;
   const [form, setForm] = useState({ exercise: 'bench', weight: '', reps: '' });
-  const [celebrate, setCelebrate] = useState(null);
-  const [section, setSection] = useState('rank'); // 'rank' | 'physique'
+  const [celebrate, setCelebrate] = useState(null); // { level } when leveling up
+  const [section, setSection] = useState('rank'); // 'rank' | 'physique' | 'leaderboard'
+  const [showFullLadder, setShowFullLadder] = useState(false);
 
   const bestLifts = useMemo(() => {
     const best = {};
@@ -4109,28 +4209,41 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
     return best;
   }, [liftLog]);
 
-  const overall = overallRank(bestLifts, bodyweight, sex);
-  const overallTier = RANK_TIERS[overall.tier];
-  const reward = RANK_REWARDS[overall.tier];
+  const totalPoints = useMemo(
+    () => computeForgePoints({ bestLifts, bodyweight, liftLog, completedDays, physiqueLog }),
+    [bestLifts, bodyweight, liftLog, completedDays, physiqueLog]
+  );
+  const level = pointsToLevel(totalPoints);
+  const leaderboard = useMemo(() => getLeaderboard(profile.name, totalPoints), [profile.name, totalPoints]);
+  const myPos = leaderboard.find(e => e.isUser);
 
   const previewE1RM = form.weight && form.reps ? estimate1RM(form.weight, form.reps) : null;
+  const previewPointsGain = useMemo(() => {
+    if (!previewE1RM) return 0;
+    const newBest = { ...bestLifts };
+    if (!newBest[form.exercise] || previewE1RM > newBest[form.exercise]) newBest[form.exercise] = previewE1RM;
+    const after = computeForgePoints({ bestLifts: newBest, bodyweight,
+      liftLog: [...(liftLog || []), { e1rm: previewE1RM }], completedDays, physiqueLog });
+    return Math.max(0, after - totalPoints);
+  }, [previewE1RM, form.exercise, bestLifts, bodyweight, liftLog, completedDays, physiqueLog, totalPoints]);
 
   const logLift = () => {
     const w = +form.weight, r = +form.reps;
     if (!w || !r) return;
     const e1rm = estimate1RM(w, r);
-    const beforeTier = overallRank(bestLifts, bodyweight, sex).tier;
+    const beforeIdx = level.idx;
     const newBest = { ...bestLifts };
     if (!newBest[form.exercise] || e1rm > newBest[form.exercise]) newBest[form.exercise] = e1rm;
-    const afterTier = overallRank(newBest, bodyweight, sex).tier;
-
-    setLiftLog(prev => [...(prev || []), {
+    const newLifts = [...(liftLog || []), {
       id: Math.random().toString(36).slice(2),
       exercise: form.exercise, weight: w, reps: r, e1rm,
       at: Date.now(), source: 'manual',
-    }]);
+    }];
+    const afterPts = computeForgePoints({ bestLifts: newBest, bodyweight, liftLog: newLifts, completedDays, physiqueLog });
+    const afterLevel = pointsToLevel(afterPts);
+    setLiftLog(newLifts);
     setForm({ exercise: form.exercise, weight: '', reps: '' });
-    if (afterTier > beforeTier) setCelebrate(RANK_TIERS[afterTier]);
+    if (afterLevel.idx > beforeIdx) setCelebrate(afterLevel);
   };
 
   return (
@@ -4143,17 +4256,21 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
       </section>
 
       {/* Section toggle */}
-      <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, border: `1px solid ${C.line}`, background: C.line }}>
-        {[{ id: 'rank', label: 'STRENGTH', Icon: Trophy }, { id: 'physique', label: 'PHYSIQUE', Icon: Camera }].map(({ id, label, Icon }) => {
+      <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, border: `1px solid ${C.line}`, background: C.line }}>
+        {[
+          { id: 'rank', label: 'STRENGTH', Icon: Trophy },
+          { id: 'leaderboard', label: 'RANKING', Icon: BarChart3 },
+          { id: 'physique', label: 'PHYSIQUE', Icon: Camera },
+        ].map(({ id, label, Icon }) => {
           const active = section === id;
           return (
             <button key={id} onClick={() => setSection(id)} style={{
-              background: active ? C.panel2 : C.bg, border: 0, padding: '14px 6px', cursor: 'pointer',
+              background: active ? C.panel2 : C.bg, border: 0, padding: '14px 4px', cursor: 'pointer',
               color: active ? C.accent : C.dim,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}>
-              <Icon size={16} />
-              <div style={{ fontFamily: fontMono, fontSize: 11, letterSpacing: 2 }}>{label}</div>
+              <Icon size={14} />
+              <div style={{ fontFamily: fontMono, fontSize: 10, letterSpacing: 1.5 }}>{label}</div>
             </button>
           );
         })}
@@ -4161,25 +4278,50 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
 
       {section === 'rank' && (
         <>
-          {/* Hero rank */}
+          {/* Hero: level + points + progress */}
           <section style={{
-            border: `1px solid ${overallTier.color}`, background: C.panel, padding: 24,
-            display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+            border: `1px solid ${level.color}`, background: C.panel, padding: 22,
           }}>
-            <RankEmblem tier={overall.tier} size={110} />
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2 }}>CURRENT RANK</div>
-              <div style={{ fontFamily: fontDisplay, fontSize: 44, color: overallTier.color, letterSpacing: 1, lineHeight: 1 }}>
-                {overallTier.name}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <RankEmblem tier={level.tier} size={100} />
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 2 }}>CURRENT LEVEL</div>
+                <div style={{ fontFamily: fontDisplay, fontSize: 42, color: level.color, letterSpacing: 1, lineHeight: 1 }}>
+                  {level.label}
+                </div>
+                <div style={{ fontFamily: fontMono, fontSize: 12, color: C.text, marginTop: 6, letterSpacing: 1 }}>
+                  <span style={{ color: C.accent }}>{totalPoints.toLocaleString()}</span> FP
+                  {myPos && <span style={{ color: C.dim }}>  ·  #{myPos.position} of {leaderboard.length}</span>}
+                </div>
               </div>
-              <div style={{ fontFamily: fontMono, fontSize: 12, color: C.text, letterSpacing: 1, marginTop: 4 }}>
-                "{reward.title}"
+            </div>
+
+            {/* Progress to next level */}
+            {level.next ? (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ height: 6, background: C.line, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${Math.round(level.progress * 100)}%`, background: level.color }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                  <span style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 1 }}>
+                    {totalPoints.toLocaleString()} FP
+                  </span>
+                  <span style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 1 }}>
+                    {(level.next.points - totalPoints).toLocaleString()} TO {RANK_TIERS[level.next.tier].name} {level.next.division}
+                  </span>
+                </div>
               </div>
-              <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, marginTop: 8 }}>
-                {overall.count === 0
-                  ? 'Log your first lift to get ranked.'
-                  : `Based on ${overall.count} lift${overall.count === 1 ? '' : 's'} · BW ${bodyweight}kg`}
+            ) : (
+              <div style={{ marginTop: 18, fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2 }}>
+                / MAX LEVEL — YOU'RE AT THE SUMMIT
               </div>
+            )}
+
+            <div style={{
+              marginTop: 14, padding: 12, borderLeft: `2px solid ${level.color}`,
+              fontFamily: fontBody, fontSize: 13, color: C.text, fontStyle: 'italic', lineHeight: 1.5,
+            }}>
+              {level.reward}
             </div>
           </section>
 
@@ -4219,7 +4361,10 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
               </div>
               {previewE1RM != null && (
                 <div style={{ fontFamily: fontMono, fontSize: 12, color: C.accent, letterSpacing: 1 }}>
-                  / EST. 1-REP MAX: {previewE1RM} KG
+                  / EST. 1RM: {previewE1RM} KG
+                  {previewPointsGain > 0 && (
+                    <span style={{ color: C.text, marginLeft: 10 }}>· +{previewPointsGain} FP</span>
+                  )}
                 </div>
               )}
               <button onClick={logLift} disabled={!form.weight || !form.reps} style={{
@@ -4259,9 +4404,6 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
                             <div style={{ height: 4, background: C.line, overflow: 'hidden' }}>
                               <div style={{ height: '100%', width: `${Math.round(info.toNext * 100)}%`, background: t.color }} />
                             </div>
-                            <div style={{ fontFamily: fontMono, fontSize: 9, color: C.dim, marginTop: 4, letterSpacing: 1 }}>
-                              {Math.round(info.toNext * 100)}% TO {RANK_TIERS[info.tier + 1].name}
-                            </div>
                           </div>
                         )}
                       </>
@@ -4274,36 +4416,46 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
 
           {/* Rewards ladder */}
           <section>
-            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>/ REWARDS LADDER</div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {RANK_REWARDS.map((r, i) => {
-                const t = RANK_TIERS[i];
-                const unlocked = i <= overall.tier && overall.count > 0;
-                const isCurrent = i === overall.tier && overall.count > 0;
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+              <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2 }}>/ REWARDS LADDER · 21 LEVELS</div>
+              <button onClick={() => setShowFullLadder(s => !s)} style={{
+                background: 'transparent', border: 0, color: C.accent, cursor: 'pointer',
+                fontFamily: fontMono, fontSize: 10, letterSpacing: 1.5,
+              }}>{showFullLadder ? 'SHOW NEARBY' : 'SHOW ALL'}</button>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {(showFullLadder
+                ? RANK_LEVELS
+                : RANK_LEVELS.filter((_, i) => Math.abs(i - level.idx) <= 3)
+              ).map((lv) => {
+                const tierMeta = RANK_TIERS[lv.tier];
+                const unlocked = lv.idx <= level.idx;
+                const isCurrent = lv.idx === level.idx;
                 return (
-                  <div key={r.tier} style={{
-                    border: `1px solid ${isCurrent ? t.color : C.line}`,
+                  <div key={lv.idx} style={{
+                    border: `1px solid ${isCurrent ? tierMeta.color : C.line}`,
                     background: unlocked ? C.panel : 'transparent',
-                    padding: 14, opacity: unlocked ? 1 : 0.5,
-                    display: 'flex', alignItems: 'center', gap: 14,
+                    padding: 12, opacity: unlocked ? 1 : 0.55,
+                    display: 'flex', alignItems: 'center', gap: 12,
                   }}>
                     <div style={{
-                      width: 30, height: 30, flexShrink: 0,
+                      width: 26, height: 26, flexShrink: 0,
                       clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
-                      background: unlocked ? t.color : C.line,
+                      background: unlocked ? tierMeta.color : C.line,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontFamily: fontDisplay, fontSize: 13, color: unlocked ? '#000' : C.dim,
-                    }}>{i + 1}</div>
+                      fontFamily: fontDisplay, fontSize: 11, color: unlocked ? '#000' : C.dim,
+                    }}>{lv.idx + 1}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontFamily: fontDisplay, fontSize: 17, letterSpacing: 0.5, color: unlocked ? t.color : C.dim }}>
-                        {r.tier} {isCurrent && <span style={{ fontSize: 10, color: C.accent }}>· YOU ARE HERE</span>}
+                      <div style={{ fontFamily: fontDisplay, fontSize: 15, letterSpacing: 0.5, color: unlocked ? tierMeta.color : C.dim }}>
+                        {tierMeta.name} {lv.division}
+                        {isCurrent && <span style={{ fontSize: 9, color: C.accent, marginLeft: 8, letterSpacing: 1.5 }}>· YOU ARE HERE</span>}
                       </div>
-                      <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, marginTop: 2, letterSpacing: 1 }}>
-                        "{r.title}" · {r.perk}
+                      <div style={{ fontFamily: fontBody, fontSize: 12, color: unlocked ? C.text : C.dim, marginTop: 2 }}>
+                        {unlocked ? lv.reward : '🔒 ' + lv.reward}
                       </div>
-                      <div style={{ fontFamily: fontBody, fontSize: 12, color: unlocked ? C.text : C.dim, marginTop: 3 }}>
-                        {unlocked ? r.unlock : '🔒 ' + r.unlock}
-                      </div>
+                    </div>
+                    <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, letterSpacing: 1, whiteSpace: 'nowrap' }}>
+                      {lv.points.toLocaleString()} FP
                     </div>
                   </div>
                 );
@@ -4344,34 +4496,101 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog }) 
         </>
       )}
 
+      {section === 'leaderboard' && (
+        <>
+          {/* Your position */}
+          <section style={{ border: `1px solid ${C.accent}`, background: C.panel, padding: 20 }}>
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.accent, letterSpacing: 2 }}>/ YOUR POSITION</div>
+            <div style={{ fontFamily: fontDisplay, fontSize: 56, color: C.text, lineHeight: 1, letterSpacing: 1, marginTop: 6 }}>
+              #{myPos.position}
+              <span style={{ color: C.dim, fontSize: 22, marginLeft: 8 }}>/ {leaderboard.length}</span>
+            </div>
+            <div style={{ fontFamily: fontMono, fontSize: 12, color: C.dim, marginTop: 8, letterSpacing: 1 }}>
+              {totalPoints.toLocaleString()} FP · {level.label}
+            </div>
+          </section>
+
+          <section>
+            <div style={{ fontFamily: fontMono, fontSize: 11, color: C.dim, letterSpacing: 2, marginBottom: 12 }}>/ GLOBAL LEADERBOARD</div>
+            <div style={{ display: 'grid', gap: 4 }}>
+              {leaderboard.map((entry) => {
+                const entryLevel = pointsToLevel(entry.pts);
+                const tierMeta = RANK_TIERS[entryLevel.tier];
+                return (
+                  <div key={entry.name + entry.position} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 14px',
+                    border: `1px solid ${entry.isUser ? C.accent : C.line}`,
+                    background: entry.isUser ? C.panel : 'transparent',
+                  }}>
+                    <div style={{
+                      fontFamily: fontMono, fontSize: 13, color: entry.isUser ? C.accent : C.dim,
+                      letterSpacing: 1, width: 36, fontWeight: 700,
+                    }}>#{entry.position}</div>
+                    <div style={{
+                      width: 20, height: 20, flexShrink: 0,
+                      clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)',
+                      background: tierMeta.color,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontFamily: fontMono, fontSize: 13,
+                        color: entry.isUser ? C.text : C.text,
+                        fontWeight: entry.isUser ? 700 : 400,
+                        letterSpacing: 0.3,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {entry.name} {entry.isUser && <span style={{ color: C.accent, fontSize: 10, marginLeft: 4 }}>· YOU</span>}
+                      </div>
+                      <div style={{ fontFamily: fontMono, fontSize: 10, color: tierMeta.color, marginTop: 1, letterSpacing: 1 }}>
+                        {entryLevel.label}
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: fontMono, fontSize: 12, color: entry.isUser ? C.accent : C.dim, whiteSpace: 'nowrap' }}>
+                      {entry.pts.toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontFamily: fontMono, fontSize: 10, color: C.dim, marginTop: 14, lineHeight: 1.5, fontStyle: 'italic' }}>
+              ↳ Showing placeholder competitors. Once login is added, this becomes the real global leaderboard.
+            </div>
+          </section>
+        </>
+      )}
+
       {section === 'physique' && (
         <PhysiqueTracker profile={profile} physiqueLog={physiqueLog} setPhysiqueLog={setPhysiqueLog} />
       )}
 
-      {/* Rank-up celebration */}
+      {/* Level-up celebration */}
       {celebrate && (
         <div onClick={() => setCelebrate(null)} style={{
           position: 'fixed', inset: 0, background: 'rgba(8,8,10,0.94)', zIndex: 400,
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
         }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            textAlign: 'center', maxWidth: 360,
-          }}>
-            <div style={{ fontFamily: fontMono, fontSize: 12, color: C.accent, letterSpacing: 4, marginBottom: 20 }}>RANK UP</div>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-              <RankEmblem tier={celebrate.id} size={160} />
+          <div onClick={e => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: 380 }}>
+            <div style={{ fontFamily: fontMono, fontSize: 12, color: C.accent, letterSpacing: 4, marginBottom: 18 }}>LEVEL UP</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+              <RankEmblem tier={celebrate.tier} size={150} />
             </div>
-            <div style={{ fontFamily: fontDisplay, fontSize: 56, color: celebrate.color, letterSpacing: 1, lineHeight: 1 }}>
-              {celebrate.name}
+            <div style={{ fontFamily: fontDisplay, fontSize: 52, color: celebrate.color, letterSpacing: 1, lineHeight: 1 }}>
+              {celebrate.label}
             </div>
-            <div style={{ fontFamily: fontMono, fontSize: 13, color: C.text, letterSpacing: 1, marginTop: 10 }}>
-              "{RANK_REWARDS[celebrate.id].title}" unlocked
+            <div style={{ fontFamily: fontMono, fontSize: 12, color: C.text, letterSpacing: 1.5, marginTop: 10 }}>
+              {totalPoints.toLocaleString()} FP
             </div>
-            <div style={{ fontFamily: fontBody, fontSize: 14, color: C.dim, marginTop: 8 }}>
-              {RANK_REWARDS[celebrate.id].unlock}
+            <div style={{
+              marginTop: 18, padding: 14,
+              borderLeft: `2px solid ${celebrate.color}`,
+              fontFamily: fontBody, fontSize: 14, color: C.text, fontStyle: 'italic', lineHeight: 1.5,
+              textAlign: 'left',
+            }}>
+              {celebrate.reward}
             </div>
             <button onClick={() => setCelebrate(null)} style={{
-              marginTop: 24, background: C.accent, color: '#000', border: 0,
+              marginTop: 20, background: C.accent, color: '#000', border: 0,
               padding: '14px 28px', cursor: 'pointer',
               fontFamily: fontMono, fontSize: 12, letterSpacing: 2, fontWeight: 700,
             }}>KEEP CLIMBING</button>
