@@ -1,4 +1,4 @@
-// FORGE v2.7 — Forge Points + leaderboard + 21 levels. If you see this comment, this is the correct file.
+// FORGE v2.8 — NOOB→GOD ranks + realistic standards. If you see this comment, this is the correct file.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { storage } from './lib/storage';
 import { callClaude } from './lib/api';
@@ -164,13 +164,13 @@ const COMMON_INJURIES = ['Lower back', 'Knees', 'Shoulders', 'Elbows', 'Wrists',
 // Ranks based on estimated 1-rep-max relative to bodyweight.
 
 const RANK_TIERS = [
-  { id: 0, name: 'IRON',     color: '#9a9a9a', glow: 'rgba(154,154,154,0.4)' },
-  { id: 1, name: 'BRONZE',   color: '#cd7f32', glow: 'rgba(205,127,50,0.4)' },
-  { id: 2, name: 'STEEL',    color: '#aebfd4', glow: 'rgba(174,191,212,0.4)' },
-  { id: 3, name: 'SILVER',   color: '#d4d4dc', glow: 'rgba(212,212,220,0.4)' },
-  { id: 4, name: 'GOLD',     color: '#ffd23f', glow: 'rgba(255,210,63,0.45)' },
-  { id: 5, name: 'TITANIUM', color: '#7fe7ff', glow: 'rgba(127,231,255,0.45)' },
-  { id: 6, name: 'MYTHIC',   color: '#d8ff36', glow: 'rgba(216,255,54,0.5)' },
+  { name: 'NOOB',     color: '#5a5a5e', glow: 'rgba(90,90,94,0.3)' },
+  { name: 'BRONZE',   color: '#cd7f32', glow: 'rgba(205,127,50,0.4)' },
+  { name: 'SILVER',   color: '#d4d4dc', glow: 'rgba(212,212,220,0.4)' },
+  { name: 'GOLD',     color: '#ffd23f', glow: 'rgba(255,210,63,0.45)' },
+  { name: 'TITANIUM', color: '#7fe7ff', glow: 'rgba(127,231,255,0.45)' },
+  { name: 'MYTHIC',   color: '#c084fc', glow: 'rgba(192,132,252,0.5)' },
+  { name: 'GOD',      color: '#d8ff36', glow: 'rgba(216,255,54,0.6)' },
 ];
 
 // The lifts we rank. Each has a label and which equipment it needs.
@@ -183,37 +183,26 @@ const RANK_LIFTS = [
   { id: 'pullup',   name: 'Weighted Pull-up' },
 ];
 
-// Bodyweight-ratio thresholds to REACH each tier (index 0=IRON ... 6=MYTHIC).
+// Bodyweight-ratio thresholds to REACH each tier (index 0=NOOB ... 6=GOD).
 // For pull-up, ratio = (bodyweight + added weight) / bodyweight.
 const STRENGTH_STANDARDS = {
   male: {
-    bench:    [0.40, 0.60, 0.85, 1.10, 1.40, 1.70, 2.00],
-    squat:    [0.60, 0.90, 1.20, 1.50, 1.85, 2.20, 2.60],
-    deadlift: [0.80, 1.10, 1.40, 1.80, 2.20, 2.60, 3.00],
-    ohp:      [0.30, 0.45, 0.60, 0.75, 0.90, 1.10, 1.30],
-    row:      [0.40, 0.60, 0.80, 1.00, 1.25, 1.50, 1.75],
-    pullup:   [1.00, 1.10, 1.25, 1.40, 1.60, 1.80, 2.00],
+    bench:    [0.00, 0.65, 0.95, 1.25, 1.55, 1.85, 2.20],
+    squat:    [0.00, 0.95, 1.30, 1.65, 2.00, 2.40, 2.85],
+    deadlift: [0.00, 1.20, 1.55, 1.95, 2.35, 2.75, 3.20],
+    ohp:      [0.00, 0.50, 0.65, 0.85, 1.00, 1.20, 1.45],
+    row:      [0.00, 0.65, 0.85, 1.10, 1.35, 1.60, 1.90],
+    pullup:   [0.00, 1.00, 1.15, 1.30, 1.50, 1.75, 2.10],
   },
   female: {
-    bench:    [0.25, 0.40, 0.55, 0.70, 0.90, 1.10, 1.30],
-    squat:    [0.40, 0.60, 0.80, 1.05, 1.30, 1.60, 1.90],
-    deadlift: [0.50, 0.75, 1.00, 1.25, 1.60, 1.95, 2.30],
-    ohp:      [0.20, 0.30, 0.40, 0.50, 0.65, 0.80, 0.95],
-    row:      [0.25, 0.40, 0.55, 0.70, 0.90, 1.10, 1.30],
-    pullup:   [1.00, 1.05, 1.15, 1.30, 1.45, 1.60, 1.75],
+    bench:    [0.00, 0.40, 0.60, 0.80, 1.00, 1.20, 1.40],
+    squat:    [0.00, 0.65, 0.90, 1.15, 1.40, 1.70, 2.05],
+    deadlift: [0.00, 0.80, 1.10, 1.40, 1.70, 2.05, 2.40],
+    ohp:      [0.00, 0.30, 0.45, 0.55, 0.70, 0.85, 1.05],
+    row:      [0.00, 0.40, 0.60, 0.80, 1.00, 1.20, 1.40],
+    pullup:   [0.00, 1.00, 1.10, 1.25, 1.45, 1.65, 1.90],
   },
 };
-
-// Rewards unlocked at each tier (titles + perks + unlocks).
-const RANK_REWARDS = [
-  { tier: 'IRON',     title: 'Initiate',   perk: 'Lift logging unlocked',        unlock: 'The basics. Everyone starts here.' },
-  { tier: 'BRONZE',   title: 'Apprentice', perk: 'Bronze badge',                 unlock: 'Accessory rotation insights' },
-  { tier: 'STEEL',    title: 'Forged',     perk: 'Steel badge',                  unlock: 'Tempo & time-under-tension tips' },
-  { tier: 'SILVER',   title: 'Striker',    perk: 'Silver badge',                 unlock: 'Advanced exercise variations' },
-  { tier: 'GOLD',     title: 'Champion',   perk: 'Gold badge + profile flair',   unlock: 'Periodization deep-dives' },
-  { tier: 'TITANIUM', title: 'Titan',      perk: 'Titanium badge',               unlock: 'Elite programming protocols' },
-  { tier: 'MYTHIC',   title: 'Mythic',     perk: 'Mythic status — the summit',   unlock: 'You are the standard others chase.' },
-];
 
 // Match a workout exercise name to a rankable lift id (or null)
 function matchRankLift(exerciseName) {
@@ -257,57 +246,31 @@ function tierForLift(liftId, e1rm, bodyweight, sex) {
   return { tier, ratio: +ratio.toFixed(2), toNext };
 }
 
-// Overall rank = the rounded average tier across all lifts the user has logged.
-function overallRank(bestLifts, bodyweight, sex) {
-  const entries = Object.entries(bestLifts || {});
-  if (entries.length === 0) return { tier: 0, count: 0 };
-  let sum = 0;
-  for (const [liftId, e1rm] of entries) {
-    sum += tierForLift(liftId, e1rm, bodyweight, sex).tier;
-  }
-  return { tier: Math.round(sum / entries.length), count: entries.length };
-}
-
 // ============================================================
-// FORGE POINTS + 21-LEVEL LADDER + LEADERBOARD
+// FORGE POINTS + 17-LEVEL LADDER + LEADERBOARD
 // ============================================================
 // Each tier has 3 divisions (III → II → I). 7 tiers × 3 = 21 levels.
 // Points come from strength (relative to bodyweight) + activity.
 
-const RANK_LEVELS = (() => {
-  const thresholds = [0,200,450,750,1100,1500,1950,2450,3000,3600,4250,4950,5700,6500,7350,8250,9200,10200,11250,12350,13500];
-  const divisions = ['III', 'II', 'I'];
-  const rewards = [
-    'Welcome to the forge. Lift logging unlocked.',
-    'Consistency badge — show up, log, repeat.',
-    'Iron grip. Form-check tips unlocked.',
-    'Bronze badge earned. Accessory rotation insights.',
-    'Tempo training guide unlocked.',
-    'Bronze elite. Profile flair: bronze ring.',
-    'Steel badge. Progressive-overload deep-dive.',
-    'Mobility protocols unlocked.',
-    'Steel elite. Profile flair: steel ring.',
-    'Silver badge. Advanced exercise variations.',
-    'Periodization planner unlocked.',
-    'Silver elite. Profile flair: silver ring.',
-    'Gold badge. Elite programming protocols.',
-    'Recovery & deload science unlocked.',
-    'Gold elite. Profile flair: gold ring.',
-    'Titanium badge. You train like a pro.',
-    'Competition-prep guide unlocked.',
-    'Titanium elite. Profile flair: titanium ring.',
-    'Mythic badge. The summit is in sight.',
-    'Mythic II. Legendary status approaching.',
-    'MYTHIC I. You are the standard others chase.',
-  ];
-  return thresholds.map((pts, i) => ({
-    idx: i,
-    tier: Math.floor(i / 3),
-    division: divisions[i % 3],
-    points: pts,
-    reward: rewards[i],
-  }));
-})();
+const RANK_LEVELS = [
+  { idx: 0,  tier: 0, division: null,  points: 0,     reward: 'Welcome to the forge. Every legend started here.' },
+  { idx: 1,  tier: 1, division: 'III', points: 200,   reward: 'Bronze entry. You showed up — that\'s most of it.' },
+  { idx: 2,  tier: 1, division: 'II',  points: 600,   reward: 'Form-check tips unlocked.' },
+  { idx: 3,  tier: 1, division: 'I',   points: 1200,  reward: 'Bronze elite. Profile flair: bronze ring.' },
+  { idx: 4,  tier: 2, division: 'III', points: 2000,  reward: 'Silver entry. Real progress is happening.' },
+  { idx: 5,  tier: 2, division: 'II',  points: 2900,  reward: 'Tempo training guide unlocked.' },
+  { idx: 6,  tier: 2, division: 'I',   points: 3900,  reward: 'Silver elite. Profile flair: silver ring.' },
+  { idx: 7,  tier: 3, division: 'III', points: 5000,  reward: 'Gold entry. Ahead of most gym-goers.' },
+  { idx: 8,  tier: 3, division: 'II',  points: 6200,  reward: 'Periodization & deload guide unlocked.' },
+  { idx: 9,  tier: 3, division: 'I',   points: 7500,  reward: 'Gold elite. Profile flair: gold ring.' },
+  { idx: 10, tier: 4, division: 'III', points: 9000,  reward: 'Titanium entry. Advanced programming unlocked.' },
+  { idx: 11, tier: 4, division: 'II',  points: 10500, reward: 'Competition prep playbook unlocked.' },
+  { idx: 12, tier: 4, division: 'I',   points: 11800, reward: 'Titanium elite. Profile flair: titanium ring.' },
+  { idx: 13, tier: 5, division: 'III', points: 12800, reward: 'Mythic entry. Less than 1% of lifters reach here.' },
+  { idx: 14, tier: 5, division: 'II',  points: 13700, reward: 'Mythic II. Legendary territory.' },
+  { idx: 15, tier: 5, division: 'I',   points: 14400, reward: 'Mythic elite. The summit is in sight.' },
+  { idx: 16, tier: 6, division: null,  points: 15000, reward: 'GOD LEVEL. World-class. You are the standard.' },
+];
 
 function computeForgePoints({ bestLifts, bodyweight, liftLog, completedDays, physiqueLog }) {
   let pts = 0;
@@ -316,9 +279,9 @@ function computeForgePoints({ bestLifts, bodyweight, liftLog, completedDays, phy
     const ratio = liftId === 'pullup' ? (bodyweight + e1rm) / bodyweight : e1rm / bodyweight;
     pts += Math.round(ratio * 600); // 1× bodyweight on a lift ≈ 600 pts
   }
-  pts += (liftLog?.length || 0) * 15;               // reward for logging
-  pts += Object.keys(completedDays || {}).length * 25; // workouts completed
-  pts += (physiqueLog?.length || 0) * 40;           // physique check-ins
+  pts += (liftLog?.length || 0) * 5;                    // small bonus for logging
+  pts += Object.keys(completedDays || {}).length * 10;  // workouts completed
+  pts += (physiqueLog?.length || 0) * 30;               // physique check-ins
   return Math.round(pts);
 }
 
@@ -328,13 +291,15 @@ function pointsToLevel(points) {
     if (points >= RANK_LEVELS[i].points) idx = i;
   }
   const level = RANK_LEVELS[idx];
+  const tierMeta = RANK_TIERS[level.tier];
   const next = RANK_LEVELS[idx + 1] || null;
   const progress = next ? Math.max(0, Math.min(1, (points - level.points) / (next.points - level.points))) : 1;
+  const label = level.division ? `${tierMeta.name} ${level.division}` : tierMeta.name;
   return {
     ...level,
-    tierName: RANK_TIERS[level.tier].name,
-    color: RANK_TIERS[level.tier].color,
-    label: `${RANK_TIERS[level.tier].name} ${level.division}`,
+    tierName: tierMeta.name,
+    color: tierMeta.color,
+    label,
     next, progress, points,
   };
 }
@@ -342,17 +307,29 @@ function pointsToLevel(points) {
 // --- LEADERBOARD (placeholder competitors until real auth + backend) ---
 // TODO: replace getLeaderboard() with a real API call once login is built.
 const SEED_COMPETITORS = [
-  { name: 'IronWillpower', pts: 13180 }, { name: 'SquatQueen_Mia', pts: 11950 },
-  { name: 'DeadliftDom', pts: 10870 },   { name: 'BenchBeast_Ali', pts: 9940 },
-  { name: 'PR_Hunter', pts: 9120 },      { name: 'StoneMoved', pts: 8330 },
-  { name: 'LiftOrLeave', pts: 7610 },    { name: 'GymRatKev', pts: 6890 },
-  { name: 'ChalkAndChains', pts: 6240 }, { name: 'NoSkipLeggz', pts: 5580 },
-  { name: 'ApexAri', pts: 4970 },        { name: 'GripCity', pts: 4410 },
-  { name: 'TheGrindNeverStops', pts: 3880 }, { name: 'RepRangeRiley', pts: 3360 },
-  { name: 'PlatePusher', pts: 2870 },    { name: 'EarlyBirdEats', pts: 2400 },
-  { name: 'FormFirstFinn', pts: 1980 },  { name: 'RookieRising', pts: 1560 },
-  { name: 'JustStartedJ', pts: 1140 },   { name: 'Day1Dani', pts: 720 },
-  { name: 'FreshMeat', pts: 360 },       { name: 'NewbieNate', pts: 120 },
+  { name: 'TheActualGOAT', pts: 15640 }, // GOD tier
+  { name: 'IronWillpower', pts: 14780 },
+  { name: 'SquatQueen_Mia', pts: 14110 },
+  { name: 'DeadliftDom', pts: 13620 },
+  { name: 'BenchBeast_Ali', pts: 12490 },
+  { name: 'PR_Hunter', pts: 11340 },
+  { name: 'StoneMoved', pts: 10180 },
+  { name: 'LiftOrLeave', pts: 8920 },
+  { name: 'GymRatKev', pts: 7740 },
+  { name: 'ChalkAndChains', pts: 6810 },
+  { name: 'NoSkipLeggz', pts: 5950 },
+  { name: 'ApexAri', pts: 5210 },
+  { name: 'GripCity', pts: 4520 },
+  { name: 'TheGrindNeverStops', pts: 3880 },
+  { name: 'RepRangeRiley', pts: 3340 },
+  { name: 'PlatePusher', pts: 2730 },
+  { name: 'EarlyBirdEats', pts: 2180 },
+  { name: 'FormFirstFinn', pts: 1620 },
+  { name: 'RookieRising', pts: 1180 },
+  { name: 'JustStartedJ', pts: 820 },
+  { name: 'Day1Dani', pts: 460 },
+  { name: 'FreshMeat', pts: 220 },
+  { name: 'NewbieNate', pts: 80 },
 ];
 
 function getLeaderboard(userName, userPoints) {
@@ -4307,7 +4284,7 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog, co
                     {totalPoints.toLocaleString()} FP
                   </span>
                   <span style={{ fontFamily: fontMono, fontSize: 10, color: C.accent, letterSpacing: 1 }}>
-                    {(level.next.points - totalPoints).toLocaleString()} TO {RANK_TIERS[level.next.tier].name} {level.next.division}
+                    {(level.next.points - totalPoints).toLocaleString()} TO {RANK_TIERS[level.next.tier].name}{level.next.division ? ' ' + level.next.division : ''}
                   </span>
                 </div>
               </div>
@@ -4447,7 +4424,7 @@ function RankTab({ profile, liftLog, setLiftLog, physiqueLog, setPhysiqueLog, co
                     }}>{lv.idx + 1}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontFamily: fontDisplay, fontSize: 15, letterSpacing: 0.5, color: unlocked ? tierMeta.color : C.dim }}>
-                        {tierMeta.name} {lv.division}
+                        {tierMeta.name}{lv.division ? ' ' + lv.division : ''}
                         {isCurrent && <span style={{ fontSize: 9, color: C.accent, marginLeft: 8, letterSpacing: 1.5 }}>· YOU ARE HERE</span>}
                       </div>
                       <div style={{ fontFamily: fontBody, fontSize: 12, color: unlocked ? C.text : C.dim, marginTop: 2 }}>
